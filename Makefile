@@ -21,9 +21,9 @@ KIND ?= $(LOCALBIN)/kind
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 
 ## Tool Versions
-KUSTOMIZE_VERSION ?= v3.8.7
-CONTROLLER_TOOLS_VERSION ?= v0.14.0
-KIND_VERSION ?= v0.19.0
+KUSTOMIZE_VERSION ?= v5.4.2
+CONTROLLER_TOOLS_VERSION ?= v0.16.5
+KIND_VERSION ?= v0.23.0
 
 
 # images
@@ -54,14 +54,14 @@ BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 #
 # For example, running 'make bundle-build bundle-push catalog-build catalog-push' will build and push both
 # wireguard-operator.io/manager-bundle:$VERSION and wireguard-operator.io/manager-catalog:$VERSION.
-IMAGE_TAG_BASE ?= ghcr.io/jodevsa/wireguard-operator
+IMAGE_TAG_BASE ?= ghcr.io/nccloud/wireguard-operator
 
 # BUNDLE_IMG defines the image:tag used for the bundle.
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)
 BUNDLE_IMG ?= $(IMAGE_TAG_BASE)-operator-bundle:main
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.22
+ENVTEST_K8S_VERSION = 1.30.0
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -109,7 +109,19 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./... -coverprofile cover.out
+        KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./... -coverprofile cover.out
+
+TEST_RUNNER_IMAGE ?= wireguard-operator-test:local
+
+test-in-docker: ## Build test runner image and execute tests inside it.
+	docker build -t $(TEST_RUNNER_IMAGE) -f images/test/Dockerfile .
+	docker run --rm \
+	  -v $(PWD):/workspace \
+	  -w /workspace \
+	  -e GOFLAGS \
+	  -e GOMODCACHE \
+	  -e GOPATH \
+	  $(TEST_RUNNER_IMAGE) /bin/bash -lc "bash hack/test-in-docker.sh $(ENVTEST_K8S_VERSION)"
 
 ##@ Build
 build: build-agent build-manager

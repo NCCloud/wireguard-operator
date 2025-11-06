@@ -3,9 +3,11 @@ ARG WIREGUARD_AGENT_SRC=/usr/local/src/wireguard-agent
 ARG PROMETHEUS_WIREGUARD_EXPORTER_SRC=/usr/local/src/prometheus-wireguard-exporter
 
 # step 1: Build Agent
-FROM --platform=${BUILDPLATFORM} golang:1.22 AS golang-builder
+FROM --platform=${BUILDPLATFORM} golang:1.25 AS golang-builder
 ARG WIREGUARD_AGENT_SRC
 WORKDIR $WIREGUARD_AGENT_SRC
+# Ensure newer toolchains can be auto-fetched if needed
+ENV GOTOOLCHAIN=auto
 # Copy the Go Modules manifests
 COPY go.mod go.mod
 COPY go.sum go.sum
@@ -13,9 +15,9 @@ COPY go.sum go.sum
 # and so that source changes don't invalidate our downloaded layer
 RUN go mod download
 # COPY src
-COPY pkg/ pkg/
+COPY api/ api/
 COPY cmd/ cmd/
-COPY internal/iptables internal/iptables
+COPY internal/ internal/
 # build
 ARG TARGETOS TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o agent -x cmd/agent/main.go
@@ -30,7 +32,7 @@ RUN set -eux; \
 # end of step 2
 
 # step 3: Build wireguard exporter
-FROM --platform=${BUILDPLATFORM} rust:1-buster AS rust-builder
+FROM --platform=${BUILDPLATFORM} rust:1-trixie AS rust-builder
 ARG PROMETHEUS_WIREGUARD_EXPORTER_SRC
 ARG TARGETPLATFORM
 
@@ -58,7 +60,7 @@ RUN set -eux; \
 # end of step 3
 
 # step 4: prepare image
-FROM --platform=${TARGETPLATFORM} debian:bookworm
+FROM debian:trixie
 ARG WIREGUARD_GO_SRC
 ARG WIREGUARD_AGENT_SRC
 ARG PROMETHEUS_WIREGUARD_EXPORTER_SRC

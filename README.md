@@ -5,8 +5,8 @@ Painless deployment of wireguard on kubernetes
 
 ## Support and discussions
 
-If you are facing any problems please open an [issue](https://github.com/jodevsa/wireguard-operator/issues) or start a 
-[discussion](https://github.com/jodevsa/wireguard-operator/discussions) 
+If you are facing any problems please open an [issue](https://github.com/nccloud/wireguard-operator/issues) or start a 
+[discussion](https://github.com/nccloud/wireguard-operator/discussions) 
 
 ## Tested with
 - [x] IBM Cloud Kubernetes Service
@@ -83,12 +83,12 @@ Endpoint = 32.121.45.102:51820
 
 ## How to deploy
 ```
-kubectl apply -f https://github.com/jodevsa/wireguard-operator/releases/download/v2.1.0/release.yaml
+kubectl apply -f https://github.com/nccloud/wireguard-operator/releases/download/v2.1.0/release.yaml
 ```
 
 ## How to remove
 ```
-kubectl delete -f https://github.com/jodevsa/wireguard-operator/releases/download/v2.1.0/release.yaml
+kubectl delete -f https://github.com/nccloud/wireguard-operator/releases/download/v2.1.0/release.yaml
 ```
 
 ## How to collaborate

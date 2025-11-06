@@ -28,13 +28,6 @@ const (
 	Ready   = "ready"
 )
 
-type WgStatusReport struct {
-	// A string field that represents the current status of Wireguard. This could include values like ready, pending, or error.
-	Status string `json:"status,omitempty"`
-	// A string field that provides additional information about the status of Wireguard. This could include error messages or other information that helps to diagnose issues with the wg instance.
-	Message string `json:"message,omitempty"`
-}
-
 // WireguardSpec defines the desired state of Wireguard
 type WireguardSpec struct {
 	// A string field that specifies the maximum transmission unit (MTU) size for Wireguard packets for all peers.
@@ -43,6 +36,8 @@ type WireguardSpec struct {
 	Address string `json:"address,omitempty"`
 	// A string field that specifies the DNS server(s) to be used by the peers.
 	Dns string `json:"dns,omitempty"`
+	// A string field that specifies the DNS search domain(s) to be used by the peers.
+	DnsSearchDomain string `json:"dnsSearchDomain,omitempty"`
 	// A field that specifies the type of Kubernetes service that should be used for the Wireguard VPN. This could be ClusterIP, NodePort or LoadBalancer, depending on the needs of the deployment.
 	ServiceType corev1.ServiceType `json:"serviceType,omitempty"`
 	// A field that specifies the value to use for a nodePort ServiceType
@@ -75,6 +70,29 @@ type WireguardStatus struct {
 	Status string `json:"status,omitempty"`
 	// A string field that provides additional information about the status of Wireguard. This could include error messages or other information that helps to diagnose issues with the wg instance.
 	Message string `json:"message,omitempty"`
+	// A stable identifier for the Wireguard instance (e.g., server public key).
+	UniqueIdentifier string `json:"uniqueIdentifier,omitempty"`
+	// Resource-level status information for associated Kubernetes resources.
+	Resources []Resource `json:"resources,omitempty"`
+	// Conditions represent the latest available observations of the Wireguard's state.
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+}
+
+// Resource describes the observed state of a related Kubernetes resource.
+type Resource struct {
+	// The resource name (e.g., my-wg-dep, my-wg-svc).
+	Name string `json:"name,omitempty"`
+	// The resource type (e.g., Deployment, Service, ConfigMap, Secret).
+	Type string `json:"type,omitempty"`
+	// A short status string (e.g., Ready, Pending, Error).
+	Status string `json:"status,omitempty"`
+	// The container image when applicable (e.g., for Deployments).
+	Image string `json:"image,omitempty"`
 }
 
 //+kubebuilder:object:root=true

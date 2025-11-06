@@ -8,6 +8,9 @@ rules:
   - ""
   resources:
   - configmaps
+  - pods
+  - secrets
+  - services
   verbs:
   - create
   - delete
@@ -24,56 +27,9 @@ rules:
   - list
   - watch
 - apiGroups:
-  - ""
-  resources:
-  - pods
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - services
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
   - apps
   resources:
   - deployments
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - apps
-  resources:
   - pods
   verbs:
   - create
@@ -87,31 +43,6 @@ rules:
   - vpn.wireguard-operator.io
   resources:
   - wireguardpeers
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - vpn.wireguard-operator.io
-  resources:
-  - wireguardpeers/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - vpn.wireguard-operator.io
-  resources:
-  - wireguardpeers/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - vpn.wireguard-operator.io
-  resources:
   - wireguards
   verbs:
   - create
@@ -124,12 +55,14 @@ rules:
 - apiGroups:
   - vpn.wireguard-operator.io
   resources:
+  - wireguardpeers/finalizers
   - wireguards/finalizers
   verbs:
   - update
 - apiGroups:
   - vpn.wireguard-operator.io
   resources:
+  - wireguardpeers/status
   - wireguards/status
   verbs:
   - get

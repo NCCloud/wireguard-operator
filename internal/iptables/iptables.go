@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
-	"github.com/jodevsa/wireguard-operator/pkg/agent"
-	"github.com/jodevsa/wireguard-operator/pkg/api/v1alpha1"
+	"github.com/nccloud/wireguard-operator/api/v1alpha1"
+	"github.com/nccloud/wireguard-operator/internal/agent"
 )
 
 func ApplyRules(rules string) error {

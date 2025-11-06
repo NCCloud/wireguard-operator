@@ -19,8 +19,8 @@ package main
 import (
 	"flag"
 	"fmt"
-	vpnv1alpha1 "github.com/jodevsa/wireguard-operator/pkg/api/v1alpha1"
-	"github.com/jodevsa/wireguard-operator/pkg/controllers"
+	vpnv1alpha1 "github.com/nccloud/wireguard-operator/api/v1alpha1"
+	controllers "github.com/nccloud/wireguard-operator/internal/controller"
 	v1 "k8s.io/api/core/v1"
 	"os"
 
@@ -34,6 +34,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -71,12 +73,13 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9443,
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "a6d3bffc.wireguard-operator.io",
+		Scheme:                  scheme,
+		Metrics:                 metricsserver.Options{BindAddress: metricsAddr},
+		WebhookServer:           webhook.NewServer(webhook.Options{Port: 9443}),
+		HealthProbeBindAddress:  probeAddr,
+		LeaderElection:          enableLeaderElection,
+		LeaderElectionID:        "a6d3bffc.wireguard-operator.io",
+		LeaderElectionNamespace: "wireguard-operator-system",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

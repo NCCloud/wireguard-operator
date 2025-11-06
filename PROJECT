@@ -5,7 +5,7 @@ plugins:
   manifests.sdk.operatorframework.io/v2: {}
   scorecard.sdk.operatorframework.io/v2: {}
 projectName: wireguard-operator
-repo: github.com/jodevsa/wireguard-operator
+repo: github.com/nccloud/wireguard-operator
 resources:
 - api:
     crdVersion: v1
@@ -14,7 +14,7 @@ resources:
   domain: wireguard-operator.io
   group: vpn
   kind: Wireguard
-  path: github.com/jodevsa/wireguard-operator/api/v1alpha1
+  path: github.com/nccloud/wireguard-operator/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -23,6 +23,6 @@ resources:
   domain: wireguard-operator.io
   group: vpn
   kind: WireguardPeer
-  path: github.com/jodevsa/wireguard-operator/api/v1alpha1
+  path: github.com/nccloud/wireguard-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

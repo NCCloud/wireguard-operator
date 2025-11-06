@@ -8,8 +8,8 @@ import (
 
 	"github.com/go-logr/logr"
 
-	"github.com/jodevsa/wireguard-operator/pkg/agent"
-	"github.com/jodevsa/wireguard-operator/pkg/api/v1alpha1"
+	"github.com/nccloud/wireguard-operator/api/v1alpha1"
+	"github.com/nccloud/wireguard-operator/internal/agent"
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"

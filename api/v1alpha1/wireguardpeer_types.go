@@ -43,6 +43,8 @@ type WireguardPeerSpec struct {
 	Disabled bool `json:"disabled,omitempty"`
 	// The DNS configuration for the peer.
 	Dns string `json:"dns,omitempty"`
+	// The DNS search domain(s) for the peer.
+	DnsSearchDomain string `json:"dnsSearchDomain,omitempty"`
 	// The private key of the peer
 	PrivateKey PrivateKey `json:"privateKeyRef,omitempty"`
 	// The key used by the peer to authenticate with the wg server.
@@ -101,6 +103,13 @@ type WireguardPeerStatus struct {
 	Status string `json:"status,omitempty"`
 	// A string field that provides additional information about the status of the Wireguard peer. This could include error messages or other information that helps to diagnose issues with the peer.
 	Message string `json:"message,omitempty"`
+	// Conditions represent the latest available observations of the WireguardPeer's state.
+	// +optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 type Speed struct {

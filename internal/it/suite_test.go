@@ -1,3 +1,6 @@
+//go:build e2e
+// +build e2e
+
 package it
 
 import (
@@ -9,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-logr/stdr"
-	"github.com/jodevsa/wireguard-operator/pkg/api/v1alpha1"
+    "github.com/go-logr/stdr"
+    "github.com/nccloud/wireguard-operator/api/v1alpha1"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	v12 "k8s.io/api/apps/v1"
@@ -92,6 +95,7 @@ func WaitForPeerToBeReady(name string, namespace string) {
 
 }
 
+// KubectlApply applies a YAML resource to the given namespace using the test kind context.
 func KubectlApply(resource string, namespace string) (string, error) {
 	cmd := exec.Command("kubectl", "apply",
 		"--context", testKindContextName,
@@ -105,10 +109,12 @@ func KubectlApply(resource string, namespace string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return stderr.String(), err
+		return strings.TrimSpace(stderr.String()), err
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }
+
+var e2eEnabled bool
 
 var _ = BeforeSuite(func() {
 	releasePath = os.Getenv("WIREGUARD_OPERATOR_RELEASE_PATH")
@@ -117,12 +123,11 @@ var _ = BeforeSuite(func() {
 	kindBinary = os.Getenv("KIND_BIN")
 	kubeConfigPath = os.Getenv("KUBE_CONFIG")
 
-	Expect(releasePath).NotTo(Equal(""))
-	Expect(agentImage).NotTo(Equal(""))
-	Expect(releasePath).NotTo(Equal(""))
-	Expect(managerImage).NotTo(Equal(""))
-	Expect(kindBinary).NotTo(Equal(""))
-	Expect(kubeConfigPath).NotTo(Equal(""))
+	if releasePath == "" || agentImage == "" || managerImage == "" || kindBinary == "" || kubeConfigPath == "" {
+		e2eEnabled = false
+		Skip("integration test env not configured; skipping e2e tests")
+	}
+	e2eEnabled = true
 
 	config := v1alpha4.Cluster{
 		Nodes: []v1alpha4.Node{
@@ -240,6 +245,9 @@ var _ = BeforeSuite(func() {
 
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
+	if !e2eEnabled {
+		return
+	}
 	err := testProvider.Delete(testClusterName, kubeConfigPath)
 	Expect(err).NotTo(HaveOccurred())
 })

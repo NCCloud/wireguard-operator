@@ -24,14 +24,16 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jodevsa/wireguard-operator/pkg/agent"
-	"github.com/jodevsa/wireguard-operator/pkg/api/v1alpha1"
+	"github.com/nccloud/wireguard-operator/api/v1alpha1"
+	"github.com/nccloud/wireguard-operator/internal/agent"
+	"github.com/nccloud/wireguard-operator/internal/ipam"
+	"github.com/nccloud/wireguard-operator/internal/resources"
 
-	"github.com/korylprince/ipnetgen"
 	wgtypes "golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	meta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -41,22 +43,36 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+const (
+	port        = 51820
+	httpPort    = 8080
+	metricsPort = 9586
+)
+
+// Standard condition types for Wireguard
+const (
+	ConditionReady       = "Ready"
+	ConditionProgressing = "Progressing"
+	ConditionDegraded    = "Degraded"
+)
+
 // WireguardReconciler reconciles a Wireguard object
-
-const port = 51820
-const httpPort = 8080
-
-const metricsPort = 9586
-
 type WireguardReconciler struct {
 	client.Client
 	Scheme               *runtime.Scheme
 	AgentImage           string
 	AgentImagePullPolicy corev1.PullPolicy
+
+	// Resource builders
+	secretBuilder     *resources.SecretBuilder
+	serviceBuilder    *resources.ServiceBuilder
+	deploymentBuilder *resources.DeploymentBuilder
+	configMapBuilder  *resources.ConfigMapBuilder
+	ipAllocator       *ipam.Allocator
 }
 
 func labelsForWireguard(name string) map[string]string {
-	return map[string]string{"app": "wireguard", "instance": name}
+	return resources.LabelsForWireguard(name)
 }
 
 func (r *WireguardReconciler) ConfigmapForWireguard(m *v1alpha1.Wireguard, hostname string) *corev1.ConfigMap {
@@ -119,48 +135,51 @@ func (r *WireguardReconciler) getNodeIps(ctx context.Context, req ctrl.Request) 
 	return ips, nil
 }
 
-func (r *WireguardReconciler) updateStatus(ctx context.Context, req ctrl.Request, wireguard *v1alpha1.Wireguard, status v1alpha1.WgStatusReport) error {
-	newWireguard := wireguard.DeepCopy()
-	if newWireguard.Status.Status != status.Status || newWireguard.Status.Message != status.Message {
-		newWireguard.Status.Status = status.Status
-		newWireguard.Status.Message = status.Message
-
-		if err := r.Status().Update(ctx, newWireguard); err != nil {
-			return err
+func (r *WireguardReconciler) updateStatus(ctx context.Context, req ctrl.Request, wireguard *v1alpha1.Wireguard, cond metav1.Condition) error {
+	latest := &v1alpha1.Wireguard{}
+	if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+		if errors.IsNotFound(err) {
+			return nil
 		}
+		return err
+	}
+
+	// Ensure transition time and observed generation are set
+	if cond.LastTransitionTime.IsZero() {
+		cond.LastTransitionTime = metav1.Now()
+	}
+	cond.ObservedGeneration = latest.GetGeneration()
+
+	meta.SetStatusCondition(&latest.Status.Conditions, cond)
+
+	// Backward-compatible summary fields derived from condition type
+	switch cond.Type {
+	case ConditionReady:
+		latest.Status.Status = v1alpha1.Ready
+	case ConditionDegraded:
+		latest.Status.Status = v1alpha1.Error
+	default:
+		latest.Status.Status = v1alpha1.Pending
+	}
+	latest.Status.Message = cond.Message
+
+	if err := r.Status().Update(ctx, latest); err != nil {
+		if errors.IsNotFound(err) || errors.IsConflict(err) {
+			// Object deleted or updated concurrently; ignore and let reconcile retry
+			return nil
+		}
+		return err
 	}
 	return nil
 }
 
 func getAvaialbleIp(cidr string, usedIps []string) (string, error) {
-	gen, err := ipnetgen.New(cidr)
-	if err != nil {
-		return "", err
-	}
-	for ip := gen.Next(); ip != nil; ip = gen.Next() {
-		used := false
-		for _, usedIp := range usedIps {
-			if ip.String() == usedIp {
-				used = true
-				break
-			}
-		}
-		if !used {
-			return ip.String(), nil
-		}
-	}
-
-	return "", fmt.Errorf("no available ip found in %s", cidr)
+	allocator := ipam.NewAllocator()
+	return allocator.AllocateIP(cidr, usedIps)
 }
 
 func (r *WireguardReconciler) getUsedIps(peers *v1alpha1.WireguardPeerList) []string {
-	usedIps := []string{"10.8.0.0", "10.8.0.1"}
-	for _, p := range peers.Items {
-		usedIps = append(usedIps, p.Spec.Address)
-
-	}
-
-	return usedIps
+	return r.ipAllocator.GetUsedIPs(peers)
 }
 
 func (r *WireguardReconciler) updateWireguardPeers(ctx context.Context, req ctrl.Request, wireguard *v1alpha1.Wireguard, serverAddress string, dns string, dnsSearchDomain string, serverPublicKey string, serverMtu string) error {
@@ -222,6 +241,9 @@ Endpoint = %s:%s"`, serverPublicKey, allowIps, serverAddress, wireguard.Status.P
 			peer.Status.Status = v1alpha1.Ready
 			peer.Status.Message = "Peer configured"
 			if err := r.Status().Update(ctx, &peer); err != nil {
+				if errors.IsConflict(err) {
+					return nil
+				}
 				return err
 			}
 		}
@@ -275,7 +297,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	log.Info("processing " + wireguard.Name)
 
 	if wireguard.Status.Status == "" {
-		err = r.updateStatus(ctx, req, wireguard, v1alpha1.WgStatusReport{Status: v1alpha1.Pending, Message: "Fetching Wireguard status"})
+		err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "FetchingStatus", Message: "Fetching Wireguard status"})
 
 		if err != nil {
 			return ctrl.Result{}, err
@@ -321,7 +343,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		// svc created successfully - return and requeue
 
-		err = r.updateStatus(ctx, req, wireguard, v1alpha1.WgStatusReport{Status: v1alpha1.Pending, Message: "Waiting for metrics service to be created"})
+		err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "MetricsServicePending", Message: "Waiting for metrics service to be created"})
 
 		if err != nil {
 			return ctrl.Result{}, err
@@ -356,6 +378,11 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// Allow overriding DNS search domain via spec
+	if wireguard.Spec.DnsSearchDomain != "" {
+		dnsSearchDomain = wireguard.Spec.DnsSearchDomain
+	}
+
 	err = r.Get(ctx, types.NamespacedName{Name: wireguard.Name + "-svc", Namespace: wireguard.Namespace}, svcFound)
 	if err != nil && errors.IsNotFound(err) {
 		svc := r.serviceForWireguard(wireguard, serviceType)
@@ -367,7 +394,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		// svc created successfully - return and requeue
 
-		err = r.updateStatus(ctx, req, wireguard, v1alpha1.WgStatusReport{Status: v1alpha1.Pending, Message: "Waiting for service to be created"})
+		err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "ServicePending", Message: "Waiting for service to be created"})
 
 		if err != nil {
 			log.Error(err, "Failed to update wireguard status", "service.Namespace", svc.Namespace, "service.Name", svc.Name)
@@ -386,7 +413,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		ingressList := svcFound.Status.LoadBalancer.Ingress
 		log.Info("Found ingress", "ingress", ingressList)
 		if len(ingressList) == 0 {
-			err = r.updateStatus(ctx, req, wireguard, v1alpha1.WgStatusReport{Status: v1alpha1.Pending, Message: "Waiting for service to be ready"})
+			err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "ServiceNotReady", Message: "Waiting for service to be ready"})
 			if err != nil {
 				return ctrl.Result{}, err
 			}
@@ -404,7 +431,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	if serviceType == corev1.ServiceTypeNodePort {
 		if len(svcFound.Spec.Ports) == 0 {
-			err = r.updateStatus(ctx, req, wireguard, v1alpha1.WgStatusReport{Status: v1alpha1.Pending, Message: "Waiting for service with type NodePort to be ready"})
+			err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "NodePortPending", Message: "Waiting for service with type NodePort to be ready"})
 			if err != nil {
 				return ctrl.Result{}, err
 			}
@@ -421,7 +448,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		if address == "" {
 			if len(ips) == 0 {
-				err = r.updateStatus(ctx, req, wireguard, v1alpha1.WgStatusReport{Status: v1alpha1.Pending, Message: "Unable to determine WG address though nodes addresses. Please set Wireguard.Spec.Address if necessary."})
+				err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "AwaitingNodeIPs", Message: "Unable to determine WG address though nodes addresses. Please set Wireguard.Spec.Address if necessary."})
 				if err != nil {
 					return ctrl.Result{}, err
 				}
@@ -434,7 +461,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	if serviceType == corev1.ServiceTypeClusterIP {
 		if len(svcFound.Spec.Ports) == 0 {
-			err = r.updateStatus(ctx, req, wireguard, v1alpha1.WgStatusReport{Status: v1alpha1.Pending, Message: "Waiting for service with type ClusterIP to be ready"})
+			err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "ClusterIPPending", Message: "Waiting for service with type ClusterIP to be ready"})
 			if err != nil {
 				return ctrl.Result{}, err
 			}
@@ -444,18 +471,21 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	if wireguard.Status.Address != address || port != wireguard.Status.Port || dnsAddress != wireguard.Status.Dns {
-		updateWireguard := wireguard.DeepCopy()
-		updateWireguard.Status.Address = address
-		updateWireguard.Status.Port = port
-		updateWireguard.Status.Dns = dnsAddress
-
-		err = r.Status().Update(ctx, updateWireguard)
-
-		if err != nil {
-			log.Error(err, "Failed to update wireguard manifest address, port, and dns")
-			return ctrl.Result{}, err
+		latest := &v1alpha1.Wireguard{}
+		if err := r.Get(ctx, req.NamespacedName, latest); err == nil {
+			latest.Status.Address = address
+			latest.Status.Port = port
+			latest.Status.Dns = dnsAddress
+			if err := r.Status().Update(ctx, latest); err != nil {
+				if errors.IsNotFound(err) || errors.IsConflict(err) {
+					// ignore and let reconcile retry
+				} else {
+					log.Error(err, "Failed to update wireguard manifest address, port, and dns")
+					return ctrl.Result{}, err
+				}
+			}
 		}
-
+		// requeue to continue processing with updated status
 		return ctrl.Result{}, nil
 	}
 
@@ -562,7 +592,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 
-		err = r.updateStatus(ctx, req, wireguard, v1alpha1.WgStatusReport{Status: v1alpha1.Pending, Message: "Waiting for configmap to be created"})
+		err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "ConfigMapPending", Message: "Waiting for configmap to be created"})
 
 		return ctrl.Result{}, err
 	} else if err != nil {
@@ -576,7 +606,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	err = r.Get(ctx, types.NamespacedName{Name: wireguard.Name + "-dep", Namespace: wireguard.Namespace}, deploymentFound)
 	if err != nil && errors.IsNotFound(err) {
 		dep := r.deploymentForWireguard(wireguard)
-		log.Info("Creating a new dep", "dep.Namespace", dep.Namespace, "dep.Name", dep.Name)
+		log.Info("Creating a new dep", "dep.Namespace", dep.Namespace, "dep.Name", dep.Name, "useUserspace", wireguard.Spec.UseWgUserspaceImplementation)
 		err = r.Create(ctx, dep)
 		if err != nil {
 			log.Error(err, "Failed to create new dep", "dep.Namespace", dep.Namespace, "dep.Name", dep.Name)
@@ -598,13 +628,121 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// ensure userspace flag presence matches spec
+	desiredUserspace := wireguard.Spec.UseWgUserspaceImplementation
+	existingUserspace := false
+	for _, c := range deploymentFound.Spec.Template.Spec.Containers {
+		if c.Name == "agent" {
+			for _, arg := range c.Command {
+				if arg == "--wg-use-userspace-implementation" {
+					existingUserspace = true
+					break
+				}
+			}
+			break
+		}
+	}
+	if existingUserspace != desiredUserspace {
+		log.Info("Updating deployment userspace flag", "desired", desiredUserspace, "existing", existingUserspace)
+		dep := r.deploymentForWireguard(wireguard)
+		if err := r.Update(ctx, dep); err != nil {
+			log.Error(err, "unable to update deployment userspace flag", "dep.Namespace", dep.Namespace, "dep.Name", dep.Name)
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Update resource-level status and unique identifier if available
+	{
+		resourcesStatus := make([]v1alpha1.Resource, 0, 4)
+
+		// Service status
+		svcStatus := "Pending"
+		if serviceType == corev1.ServiceTypeLoadBalancer {
+			if len(svcFound.Status.LoadBalancer.Ingress) > 0 {
+				svcStatus = "Ready"
+			}
+		} else if serviceType == corev1.ServiceTypeNodePort {
+			if len(svcFound.Spec.Ports) > 0 && svcFound.Spec.Ports[0].NodePort != 0 {
+				svcStatus = "Ready"
+			}
+		} else { // ClusterIP
+			if svcFound.Spec.ClusterIP != "" {
+				svcStatus = "Ready"
+			}
+		}
+		resourcesStatus = append(resourcesStatus, v1alpha1.Resource{Name: svcFound.Name, Type: "Service", Status: svcStatus})
+
+		// ConfigMap status
+		cfgStatus := "Pending"
+		if configFound.Name != "" {
+			cfgStatus = "Ready"
+		}
+		resourcesStatus = append(resourcesStatus, v1alpha1.Resource{Name: configFound.Name, Type: "ConfigMap", Status: cfgStatus})
+
+		// Secret status and unique identifier
+		secStatus := "Pending"
+		uniqueIdentifier := ""
+		if secret.Name != "" {
+			secStatus = "Ready"
+			uniqueIdentifier = string(secret.Data["publicKey"])
+		}
+		resourcesStatus = append(resourcesStatus, v1alpha1.Resource{Name: wireguard.Name, Type: "Secret", Status: secStatus})
+
+		// Deployment status
+		depStatus := "Pending"
+		depImage := ""
+		if deploymentFound.Name != "" {
+			if deploymentFound.Status.ReadyReplicas > 0 {
+				depStatus = "Ready"
+			}
+			for _, c := range deploymentFound.Spec.Template.Spec.Containers {
+				if c.Name == "agent" {
+					depImage = c.Image
+					break
+				}
+			}
+		}
+		resourcesStatus = append(resourcesStatus, v1alpha1.Resource{Name: deploymentFound.Name, Type: "Deployment", Status: depStatus, Image: depImage})
+
+		// Update status if changed
+		needUpdate := false
+		if wireguard.Status.UniqueIdentifier != uniqueIdentifier {
+			needUpdate = true
+		}
+		if len(wireguard.Status.Resources) != len(resourcesStatus) {
+			needUpdate = true
+		} else {
+			for i := range resourcesStatus {
+				if wireguard.Status.Resources[i] != resourcesStatus[i] {
+					needUpdate = true
+					break
+				}
+			}
+		}
+		if needUpdate {
+			latest := &v1alpha1.Wireguard{}
+			if err := r.Get(ctx, req.NamespacedName, latest); err == nil {
+				latest.Status.UniqueIdentifier = uniqueIdentifier
+				latest.Status.Resources = resourcesStatus
+				if err := r.Status().Update(ctx, latest); err != nil {
+					if errors.IsNotFound(err) || errors.IsConflict(err) {
+						// ignore; continue
+					} else {
+						log.Error(err, "Failed to update wireguard resource status")
+						return ctrl.Result{}, err
+					}
+				}
+			}
+		}
+	}
+
 	if err := r.updateWireguardPeers(ctx, req, wireguard, address, dnsAddress, dnsSearchDomain, string(secret.Data["publicKey"]), wireguard.Spec.Mtu); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	log.Info("Updated related peers", "wireguard.Namespace", wireguard.Namespace, "wireguard.Name", wireguard.Name)
 
-	err = r.updateStatus(ctx, req, wireguard, v1alpha1.WgStatusReport{Status: v1alpha1.Ready, Message: "VPN is active!"})
+	err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionReady, Status: metav1.ConditionTrue, Reason: "Active", Message: "VPN is active!"})
 
 	if err != nil {
 		return ctrl.Result{}, err
@@ -615,6 +753,13 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *WireguardReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Initialize resource builders
+	r.secretBuilder = resources.NewSecretBuilder(r.Scheme)
+	r.serviceBuilder = resources.NewServiceBuilder(r.Scheme)
+	r.deploymentBuilder = resources.NewDeploymentBuilder(r.Scheme, r.AgentImage, r.AgentImagePullPolicy)
+	r.configMapBuilder = resources.NewConfigMapBuilder(r.Scheme)
+	r.ipAllocator = ipam.NewAllocator()
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.Wireguard{}).
 		Owns(&v1alpha1.WireguardPeer{}).

@@ -8,9 +8,9 @@ import (
 	"os"
 
 	"github.com/go-logr/stdr"
-	"github.com/jodevsa/wireguard-operator/internal/iptables"
-	"github.com/jodevsa/wireguard-operator/pkg/agent"
-	"github.com/jodevsa/wireguard-operator/pkg/wireguard"
+	"github.com/nccloud/wireguard-operator/internal/agent"
+	"github.com/nccloud/wireguard-operator/internal/iptables"
+	"github.com/nccloud/wireguard-operator/internal/wireguard"
 )
 
 func main() {

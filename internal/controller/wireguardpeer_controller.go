@@ -19,7 +19,8 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"github.com/jodevsa/wireguard-operator/pkg/api/v1alpha1"
+
+	"github.com/nccloud/wireguard-operator/api/v1alpha1"
 
 	wgtypes "golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +34,7 @@ import (
 )
 
 // WireguardPeerReconciler reconciles a WireguardPeer object
+
 type WireguardPeerReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme

@@ -23,7 +23,8 @@ testbin/*
 *.swp
 *.swo
 *~
-
+.DS_Store
 
 #
+release.yaml
 release_it.yaml
