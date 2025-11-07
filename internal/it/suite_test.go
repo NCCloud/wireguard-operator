@@ -265,11 +265,11 @@ var _ = BeforeSuite(func() {
 
 }, 60)
 
-// var _ = AfterSuite(func() {
-// 	By("tearing down the test environment")
-// 	if !e2eEnabled {
-// 		return
-// 	}
-// 	err := testProvider.Delete(testClusterName, kubeConfigPath)
-// 	Expect(err).NotTo(HaveOccurred())
-// })
+var _ = AfterSuite(func() {
+	By("tearing down the test environment")
+	if !e2eEnabled {
+		return
+	}
+	err := testProvider.Delete(testClusterName, kubeConfigPath)
+	Expect(err).NotTo(HaveOccurred())
+})
