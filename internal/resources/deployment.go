@@ -54,9 +54,6 @@ func (b *DeploymentBuilder) ForWireguard(wg *v1alpha1.Wireguard) (*appsv1.Deploy
 	replicas := int32(1)
 
 	// Security context settings
-	runAsNonRoot := true
-	runAsUser := int64(65534)
-	runAsGroup := int64(65534)
 	readOnlyRootFilesystem := true
 	allowPrivilegeEscalation := false
 	automountServiceAccountToken := false
@@ -102,7 +99,6 @@ func (b *DeploymentBuilder) ForWireguard(wg *v1alpha1.Wireguard) (*appsv1.Deploy
 					},
 					InitContainers: []corev1.Container{},
 					Containers: []corev1.Container{
-						b.metricsContainer(wg, runAsUser, runAsGroup, runAsNonRoot, readOnlyRootFilesystem, allowPrivilegeEscalation),
 						b.agentContainer(wg, readOnlyRootFilesystem, allowPrivilegeEscalation),
 					},
 				},
@@ -129,41 +125,6 @@ func (b *DeploymentBuilder) ForWireguard(wg *v1alpha1.Wireguard) (*appsv1.Deploy
 	}
 
 	return dep, nil
-}
-
-// metricsContainer creates the metrics container for the deployment.
-func (b *DeploymentBuilder) metricsContainer(wg *v1alpha1.Wireguard, runAsUser, runAsGroup int64, runAsNonRoot, readOnlyRootFilesystem, allowPrivilegeEscalation bool) corev1.Container {
-	return corev1.Container{
-		SecurityContext: &corev1.SecurityContext{
-			RunAsUser:                &runAsUser,
-			RunAsGroup:               &runAsGroup,
-			RunAsNonRoot:             &runAsNonRoot,
-			ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,
-			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-				Add:  []corev1.Capability{"NET_ADMIN"},
-			},
-		},
-		Image:           b.agentImage,
-		ImagePullPolicy: b.agentImagePullPolicy,
-		Name:            "metrics",
-		Command:         []string{"/usr/local/bin/prometheus_wireguard_exporter"},
-		Ports: []corev1.ContainerPort{
-			{
-				ContainerPort: MetricsPort,
-				Name:          "metrics",
-				Protocol:      corev1.ProtocolTCP,
-			},
-		},
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      "socket",
-				MountPath: "/var/run/wireguard/",
-			},
-		},
-		Resources: wg.Spec.Metric.Resources,
-	}
 }
 
 // agentContainer creates the agent container for the deployment.
@@ -194,6 +155,11 @@ func (b *DeploymentBuilder) agentContainer(wg *v1alpha1.Wireguard, readOnlyRootF
 			{
 				ContainerPort: WireguardPort,
 				Name:          "http",
+				Protocol:      corev1.ProtocolTCP,
+			},
+			{
+				ContainerPort: MetricsPort,
+				Name:          "metrics",
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},

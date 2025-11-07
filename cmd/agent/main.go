@@ -20,12 +20,14 @@ func main() {
 	var wgUserspaceImplementationFallback string
 	var wireguardListenPort int
 	var wgUseUserspaceImpl bool
+	var metricsBindAddress string
 	flag.StringVar(&configFilePath, "state", "./state.json", "The location of the file that states the desired state")
 	flag.StringVar(&iface, "wg-iface", "wg0", "the wg device name. Default is wg0")
 	flag.StringVar(&wgUserspaceImplementationFallback, "wg-userspace-implementation-fallback", "wireguard-go", "The userspace implementation of wireguard to fallback to")
 	flag.IntVar(&wireguardListenPort, "wg-listen-port", 51820, "the UDP port wireguard is listening on")
 	flag.IntVar(&verbosity, "v", 1, "the verbosity level")
 	flag.BoolVar(&wgUseUserspaceImpl, "wg-use-userspace-implementation", false, "Use userspace implementation")
+	flag.StringVar(&metricsBindAddress, "metrics-bind-address", ":9586", "The address the Prometheus metrics endpoint binds to.")
 	flag.Parse()
 
 	println(fmt.Sprintf(
@@ -81,6 +83,8 @@ func main() {
 
 	close, err := agent.OnStateChange(configFilePath, log.WithName("onStateChange"), func(state agent.State) {
 		log.Info("Received a new state")
+		// Update metrics mapping for peer_name label
+		agent.UpdatePeerNameMapping(state.Peers)
 		err := wg.Sync(state)
 		if err != nil {
 			log.Error(err, "Error while sycncing wireguard")
@@ -131,5 +135,13 @@ func main() {
 
 		w.WriteHeader(http.StatusOK)
 	})
-	http.ListenAndServe(":8080", nil)
+
+	// Start metrics endpoint on a separate server
+	go func() { _ = agent.StartMetricsServer(metricsBindAddress, httpLog) }()
+
+	// Register collector
+	agent.RegisterWireguardCollector(iface)
+
+	// Health endpoint server (blocking)
+	_ = http.ListenAndServe(":8080", nil)
 }

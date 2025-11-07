@@ -13,7 +13,10 @@ import (
 func ApplyRules(rules string) error {
 	cmd := exec.Command("iptables-restore")
 	cmd.Stdin = strings.NewReader(rules)
-	return cmd.Run()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("iptables-restore failed: %w: %s", err, string(out))
+	}
+	return nil
 }
 
 type Iptables struct {

@@ -43,4 +43,35 @@ spec:
 
 		// TODO: connect to wg
 	})
+
+	It("exposes Prometheus metrics", func() {
+		// Ensure the Wireguard server exists and is ready from previous spec
+		WaitForWireguardToBeReady("vpn", TestNamespace)
+
+		metricsCheckPod := `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: metrics-check
+spec:
+  restartPolicy: Never
+  containers:
+  - name: curl
+    image: curlimages/curl:8.17.0
+    command: ["sh","-c"]
+    args:
+    - >
+      curl -sS http://vpn-metrics-svc.default.svc.cluster.local:9586/metrics |
+      grep -E 'wireguard_(sent_bytes_total|received_bytes_total|latest_handshake_seconds)'
+`
+		output, err := KubectlApply(metricsCheckPod, TestNamespace)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(output).To(Equal("pod/metrics-check created"))
+
+		WaitForPodSucceeded("metrics-check", TestNamespace)
+
+		logs, err := KubectlLogs("metrics-check", TestNamespace)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(logs).To(ContainSubstring("wireguard_"))
+	})
 })

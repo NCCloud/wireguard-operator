@@ -31,7 +31,7 @@ If you are facing any problems please open an [issue](https://github.com/nccloud
 * Automatic key generation
 * Automatic IP allocation
 * Does not need persistance. peer/server keys are stored as k8s secrets and loaded into the wireguard pod
-* Exposes a metrics endpoint by utilizing [prometheus_wireguard_exporter](https://github.com/MindFlavor/prometheus_wireguard_exporter)
+* Exposes a metrics endpoint
 
 ## Example
 

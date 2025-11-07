@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-    "github.com/go-logr/stdr"
-    "github.com/nccloud/wireguard-operator/api/v1alpha1"
+	"github.com/go-logr/stdr"
+	"github.com/nccloud/wireguard-operator/api/v1alpha1"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	v12 "k8s.io/api/apps/v1"
@@ -93,6 +93,28 @@ func WaitForPeerToBeReady(name string, namespace string) {
 		return wg.Status.Status
 	}, Timeout, Interval).Should(Equal(v1alpha1.Ready))
 
+}
+
+func WaitForPodSucceeded(name string, namespace string) {
+	Eventually(func() string {
+		out, _ := exec.Command("kubectl", "--context", testKindContextName, "-n", namespace, "get", "pod", name, "-o", "jsonpath={.status.phase}").Output()
+		return strings.TrimSpace(string(out))
+	}, Timeout, Interval).Should(Equal("Succeeded"))
+}
+
+func KubectlLogs(pod string, namespace string) (string, error) {
+	cmd := exec.Command("kubectl", "logs",
+		"--context", testKindContextName,
+		"-n", namespace,
+		pod,
+	)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return strings.TrimSpace(stderr.String()), err
+	}
+	return strings.TrimSpace(stdout.String()), nil
 }
 
 // KubectlApply applies a YAML resource to the given namespace using the test kind context.
@@ -243,11 +265,11 @@ var _ = BeforeSuite(func() {
 
 }, 60)
 
-var _ = AfterSuite(func() {
-	By("tearing down the test environment")
-	if !e2eEnabled {
-		return
-	}
-	err := testProvider.Delete(testClusterName, kubeConfigPath)
-	Expect(err).NotTo(HaveOccurred())
-})
+// var _ = AfterSuite(func() {
+// 	By("tearing down the test environment")
+// 	if !e2eEnabled {
+// 		return
+// 	}
+// 	err := testProvider.Delete(testClusterName, kubeConfigPath)
+// 	Expect(err).NotTo(HaveOccurred())
+// })

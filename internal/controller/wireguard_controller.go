@@ -531,8 +531,12 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				// this is needed to force k8s to push the new secret to the pod
 				pod.Annotations["wgConfigLastUpdated"] = time.Now().Format("2006-01-02T15-04-05")
 				if err := r.Update(ctx, &pod); err != nil {
-					log.Error(err, "Failed to update pod")
-					return ctrl.Result{}, err
+					if errors.IsConflict(err) {
+						// ignore conflict; we'll see the updated pod on next reconcile
+					} else {
+						log.Error(err, "Failed to update pod")
+						return ctrl.Result{}, err
+					}
 				}
 
 				log.Info("updated pod")
@@ -847,9 +851,6 @@ func (r *WireguardReconciler) deploymentForWireguard(m *v1alpha1.Wireguard) *app
 	ls := labelsForWireguard(m.Name)
 	replicas := int32(1)
 
-	runAsNonRoot := true
-	runAsUser := int64(65534)
-	runAsGroup := int64(65534)
 	readOnlyRootFilesystem := true
 	allowPrivilegeEscalation := false
 	automountServiceAccountToken := false
@@ -896,36 +897,6 @@ func (r *WireguardReconciler) deploymentForWireguard(m *v1alpha1.Wireguard) *app
 						}},
 					InitContainers: []corev1.Container{},
 					Containers: []corev1.Container{
-						{
-							SecurityContext: &corev1.SecurityContext{
-								RunAsUser:                &runAsUser,
-								RunAsGroup:               &runAsGroup,
-								RunAsNonRoot:             &runAsNonRoot,
-								ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,
-								AllowPrivilegeEscalation: &allowPrivilegeEscalation,
-								Capabilities: &corev1.Capabilities{
-									Drop: []corev1.Capability{"ALL"},
-									Add:  []corev1.Capability{"NET_ADMIN"},
-								},
-							},
-							Image:           r.AgentImage,
-							ImagePullPolicy: r.AgentImagePullPolicy,
-							Name:            "metrics",
-							Command:         []string{"/usr/local/bin/prometheus_wireguard_exporter"},
-							Ports: []corev1.ContainerPort{
-								{
-									ContainerPort: metricsPort,
-									Name:          "metrics",
-									Protocol:      corev1.ProtocolTCP,
-								}},
-							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      "socket",
-									MountPath: "/var/run/wireguard/",
-								},
-							},
-							Resources: m.Spec.Metric.Resources,
-						},
 						{
 							SecurityContext: &corev1.SecurityContext{
 								ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,

@@ -19,10 +19,11 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
+
 	vpnv1alpha1 "github.com/nccloud/wireguard-operator/api/v1alpha1"
 	controllers "github.com/nccloud/wireguard-operator/internal/controller"
 	v1 "k8s.io/api/core/v1"
-	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -57,6 +58,7 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var wgImage string
+	var leaderElectionNamespaceFlag string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&wgImage, "agent-image", "", "The image used for wireguard server")
@@ -64,6 +66,7 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&agentImagePullPolicy, "agent-image-pull-policy", "IfNotPresent", "Use userspace implementation")
+	flag.StringVar(&leaderElectionNamespaceFlag, "leader-election-namespace", "", "Namespace to place the leader election Lease. Defaults to the operator Pod's namespace when empty.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -72,6 +75,20 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	leaderElectionNamespace := leaderElectionNamespaceFlag
+	if leaderElectionNamespace == "" {
+		if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+			leaderElectionNamespace = ns
+		} else {
+			// Fallback to in-cluster serviceaccount namespace file if present
+			if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+				if s := string(data); s != "" {
+					leaderElectionNamespace = s
+				}
+			}
+		}
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                  scheme,
 		Metrics:                 metricsserver.Options{BindAddress: metricsAddr},
@@ -79,7 +96,7 @@ func main() {
 		HealthProbeBindAddress:  probeAddr,
 		LeaderElection:          enableLeaderElection,
 		LeaderElectionID:        "a6d3bffc.wireguard-operator.io",
-		LeaderElectionNamespace: "wireguard-operator-system",
+		LeaderElectionNamespace: leaderElectionNamespace,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

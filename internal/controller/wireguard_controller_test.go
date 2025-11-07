@@ -354,8 +354,7 @@ var _ = Describe("wireguard controller", func() {
 				}
 				deployment := &appsv1.Deployment{}
 				Expect(k8sClient.Get(context.Background(), deploymentKey, deployment)).Should(Succeed())
-				Expect(len(deployment.Spec.Template.Spec.Containers)).Should(Equal(2))
-				Expect(deployment.Spec.Template.Spec.Containers[0].Image).Should(Equal(deployment.Spec.Template.Spec.Containers[1].Image))
+				Expect(len(deployment.Spec.Template.Spec.Containers)).Should(Equal(1))
 				return deployment.Spec.Template.Spec.Containers[0].Image
 			}, Timeout, Interval).Should(Equal(wgTestImage))
 
@@ -551,8 +550,7 @@ Endpoint = %s:%s"`, peerKey.Name+"-peer", peer.Namespace, peer.Spec.Address, dns
 				}
 				deployment := &appsv1.Deployment{}
 				Expect(k8sClient.Get(context.Background(), deploymentKey, deployment)).Should(Succeed())
-				Expect(len(deployment.Spec.Template.Spec.Containers)).Should(Equal(2))
-				Expect(deployment.Spec.Template.Spec.Containers[0].Image).Should(Equal(deployment.Spec.Template.Spec.Containers[1].Image))
+				Expect(len(deployment.Spec.Template.Spec.Containers)).Should(Equal(1))
 				return deployment.Spec.Template.Spec.Containers[0].Image
 			}, Timeout, Interval).Should(Equal(wgTestImage))
 
@@ -754,8 +752,7 @@ Endpoint = %s:%s"`, peerKey.Name+"-peer", peer.Namespace, peer.Spec.Address, dns
 				}
 				deployment := &appsv1.Deployment{}
 				Expect(k8sClient.Get(context.Background(), deploymentKey, deployment)).Should(Succeed())
-				Expect(len(deployment.Spec.Template.Spec.Containers)).Should(Equal(2))
-				Expect(deployment.Spec.Template.Spec.Containers[0].Image).Should(Equal(deployment.Spec.Template.Spec.Containers[1].Image))
+				Expect(len(deployment.Spec.Template.Spec.Containers)).Should(Equal(1))
 				return deployment.Spec.Template.Spec.Containers[0].Image
 			}, Timeout, Interval).Should(Equal(wgTestImage))
 

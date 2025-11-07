@@ -148,13 +148,13 @@ docker-build-integration-test:  docker-build-manager
 	$(MAKE) docker-build-manager
 
 
-run-e2e:
+run-e2e: $(KIND)
 	AGENT_IMAGE=${AGENT_IMAGE} $(MAKE) update-agent-image
 	MANAGER_IMAGE=${MANAGER_IMAGE} $(MAKE) update-manager-image
 	$(KUSTOMIZE) build config/default > release_it.yaml
 	git checkout ./config/default/manager_auth_proxy_patch.yaml
 	git checkout ./config/manager/kustomization.yaml
-	KUBE_CONFIG=$(HOME)/.kube/config KIND_BIN=${KIND} WIREGUARD_OPERATOR_RELEASE_PATH="../../release_it.yaml" AGENT_IMAGE=${AGENT_IMAGE} MANAGER_IMAGE=${MANAGER_IMAGE} go test ./internal/it/ -v -count=1
+	KUBECONFIG=$(HOME)/.kube/config KUBE_CONFIG=$(HOME)/.kube/config KIND_BIN=${KIND} WIREGUARD_OPERATOR_RELEASE_PATH="../../release_it.yaml" AGENT_IMAGE=${AGENT_IMAGE} MANAGER_IMAGE=${MANAGER_IMAGE} go test -tags=e2e ./internal/it/ -v -count=1
 
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
