@@ -3,14 +3,17 @@ package wireguard
 import (
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"syscall"
+	"time"
 
 	"github.com/go-logr/logr"
 
 	"github.com/nccloud/wireguard-operator/api/v1alpha1"
 	"github.com/nccloud/wireguard-operator/internal/agent"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
@@ -75,17 +78,37 @@ func syncAddress(_ agent.State, iface string) error {
 }
 
 func createLinkUsingUserspaceImpl(iface string, wgUserspaceImplementationFallback string) error {
-
-	bashCommand := fmt.Sprintf("mkdir -p /dev/net && if [ ! -c /dev/net/tun ]; then\n    mknod /dev/net/tun c 10 200\nfi && %s %s", wgUserspaceImplementationFallback, iface)
-	cmd := exec.Command("bash", "-c", bashCommand)
-
-	err := cmd.Run()
-	if err != nil {
+	// Ensure /dev/net exists
+	if err := os.MkdirAll("/dev/net", 0o755); err != nil {
 		return err
 	}
 
-	return nil
+	// Ensure /dev/net/tun is a character device; create it if missing
+	fi, err := os.Stat("/dev/net/tun")
+	if err != nil {
+		if os.IsNotExist(err) {
+			mode := uint32(syscall.S_IFCHR | 0o666)
+			dev := int(unix.Mkdev(10, 200))
+			if err := unix.Mknod("/dev/net/tun", mode, dev); err != nil {
+				return fmt.Errorf("mknod /dev/net/tun failed: %w", err)
+			}
+		} else {
+			return err
+		}
+	} else {
+		mode := fi.Mode()
+		if !(mode&os.ModeDevice != 0 && mode&os.ModeCharDevice != 0) {
+			return fmt.Errorf("/dev/net/tun exists but is not a character device")
+		}
+	}
 
+	// Launch userspace implementation (e.g., wireguard-go) to create the interface
+	cmd := exec.Command(wgUserspaceImplementationFallback, iface)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting userspace implementation %q failed: %w", wgUserspaceImplementationFallback, err)
+	}
+
+	return nil
 }
 
 func createLinkUsingKernalModule(iface string) error {
@@ -120,6 +143,27 @@ func SyncLink(_ agent.State, iface string, wgUserspaceImplementationFallback str
 				return err
 			}
 
+			// Wait briefly for userspace implementation to create the link
+			var lastErr error
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				var l netlink.Link
+				l, lastErr = netlink.LinkByName(iface)
+				if lastErr == nil {
+					// Ensure link is up
+					if err := netlink.LinkSetUp(l); err != nil {
+						return fmt.Errorf("bringing link %q up failed: %w", iface, err)
+					}
+					lastErr = nil
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+
+			if lastErr != nil {
+				return fmt.Errorf("userspace WireGuard did not create link %q in time: %w; ensure a userspace implementation (e.g., wireguard-go) is running for this interface", iface, lastErr)
+			}
+
 		} else {
 			err = createLinkUsingKernalModule(iface)
 
@@ -132,13 +176,13 @@ func SyncLink(_ agent.State, iface string, wgUserspaceImplementationFallback str
 			}
 		}
 
-		// TODO: Can this be removed?
+		// Verify link exists after creation
 		link, err := netlink.LinkByName(iface)
 		if err != nil {
-			return err
+			return fmt.Errorf("expected link %q after creation, but not found: %w", iface, err)
 		}
 		if err := netlink.LinkSetUp(link); err != nil {
-			return err
+			return fmt.Errorf("bringing link %q up failed: %w", iface, err)
 		}
 	}
 
