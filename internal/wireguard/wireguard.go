@@ -66,7 +66,7 @@ func syncAddress(_ agent.State, iface string) error {
 	}
 
 	if err := netlink.AddrAdd(link, &netlink.Addr{
-		IPNet: &net.IPNet{IP: net.ParseIP("10.8.0.1")},
+		IPNet: &getIP("10.8.0.1/32")[0],
 	}); err != nil {
 		return fmt.Errorf("netlink addr add: %w", err)
 	}
@@ -186,31 +186,6 @@ func SyncLink(_ agent.State, iface string, wgUserspaceImplementationFallback str
 		}
 	}
 
-	link, err := netlink.LinkByName(iface)
-	if err != nil {
-		if _, ok := err.(netlink.LinkNotFoundError); !ok {
-			return err
-		}
-	}
-
-	addresses, err := netlink.AddrList(link, syscall.AF_INET)
-	if err != nil {
-		return nil
-	}
-
-	if len(addresses) != 0 {
-		return nil
-	}
-
-	if err := netlink.AddrAdd(link, &netlink.Addr{
-		IPNet: &getIP("10.8.0.1/32")[0],
-	}); err != nil {
-		return fmt.Errorf("netlink addr add: %w", err)
-	}
-
-	if err := netlink.LinkSetUp(link); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -255,15 +230,15 @@ func (wg *Wireguard) Sync(state agent.State) error {
 		return err
 	}
 
-	// route all traffic coming from 10.8.0.0/24 via gateway 10.8.0.1 on wg0
-	err = syncRoute(state, wg.Iface)
-
+	// set wg0 gateway as 10.8.0.1/32
+	err = syncAddress(state, wg.Iface)
 	if err != nil {
 		return err
 	}
 
-	// set wg0 gateway as 10.8.0.1/32
-	err = syncAddress(state, wg.Iface)
+	// route all traffic coming from 10.8.0.0/24 via gateway 10.8.0.1 on wg0
+	err = syncRoute(state, wg.Iface)
+
 	if err != nil {
 		return err
 	}

@@ -59,11 +59,16 @@ func GenerateIptableRulesFromNetworkPolicies(policies v1alpha1.EgressNetworkPoli
 		// allow peer to communicate with itself
 		fmt.Sprintf("-A %s -d %s -j ACCEPT", peerChain, peerIp),
 
-		// allow peer to communicate with kube-dns
+		// allow peer to communicate with kube-dns (UDP and TCP for large DNS responses)
 		fmt.Sprintf("-A %s -d %s -p UDP --dport 53 -j ACCEPT", peerChain, kubeDnsIp),
+		fmt.Sprintf("-A %s -d %s -p TCP --dport 53 -j ACCEPT", peerChain, kubeDnsIp),
 	}
 
 	for _, policy := range policies {
+		// skip empty policies to avoid redundant unconditional REJECT rules
+		if policy.Action == "" && policy.Protocol == "" && policy.To.Ip == "" && policy.To.Port == 0 {
+			continue
+		}
 		rules = append(rules, EgressNetworkPolicyToIpTableRules(policy, peerChain)...)
 	}
 
@@ -122,7 +127,7 @@ func EgressNetworkPolicyToIpTableRules(policy v1alpha1.EgressNetworkPolicy, peer
 
 	// customer rules
 	var rulePeerChain = "-A " + peerChain
-	var ruleAction = string("-j " + v1alpha1.EgressNetworkPolicyActionDeny)
+	var ruleAction = "-j REJECT"
 	var ruleProtocol = ""
 	var ruleDestIp = ""
 	var ruleDestPort = ""
