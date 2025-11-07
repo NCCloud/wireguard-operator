@@ -225,21 +225,16 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              config:
-                description: |-
-                  INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-                  Important: Run "make" to regenerate code after modifying this file
-                  A string field that contains the current configuration for the Wireguard peer.
-                type: string
               message:
                 description: A string field that provides additional information about
                   the status of the Wireguard peer. This could include error messages
                   or other information that helps to diagnose issues with the peer.
                 type: string
               status:
-                description: A string field that represents the current status of
-                  the Wireguard peer. This could include values like ready, pending,
-                  or error.
+                description: |-
+                  INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
+                  Important: Run "make" to regenerate code after modifying this file
+                  A string field that represents the current status of the Wireguard peer. This could include values like ready, pending, or error.
                 type: string
             type: object
         type: object

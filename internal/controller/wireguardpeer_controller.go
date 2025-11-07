@@ -194,14 +194,7 @@ func (r *WireguardPeerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	if newPeer.Status.Config == "" {
-		err = r.updateStatus(ctx, newPeer, v1alpha1.Pending, "Waiting config to be updated")
-
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-
-	}
+	// No longer wait for a config in status; peer configs are stored in a Secret
 
 	return ctrl.Result{}, nil
 }

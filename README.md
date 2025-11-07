@@ -59,14 +59,13 @@ spec:
 
 #### Peer configuration
 
-Peer configuration can be retrieved using the following command:
+Peer configurations are stored in a Secret named `<wireguard-name>-peer-configs`, one key per peer. Retrieve and decode like this:
 
 ```console
-kubectl get wireguardpeer peer1 --template={{.status.config}} | bash
+kubectl get secret my-cool-vpn-peer-configs -o jsonpath='{.data.peer1}' | base64 -d
 ```
 
-After executing it, something similar to the following will be shown. Use this config snippet to configure your
-preferred Wireguard client:
+Use the output to configure your preferred Wireguard client:
 
 ```console
 [Interface]

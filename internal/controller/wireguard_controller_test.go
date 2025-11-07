@@ -207,18 +207,19 @@ var _ = Describe("wireguard controller", func() {
 			Expect(reconcileServiceWithTypeNodePort(serviceKey, expectedPort, 51820)).Should(Succeed())
 
 			Eventually(func() string {
-				wgPeer := &v1alpha1.WireguardPeer{}
-				err := k8sClient.Get(context.Background(), wgPeerKey, wgPeer)
+				secret := &corev1.Secret{}
+				err := k8sClient.Get(context.Background(), types.NamespacedName{Name: wgName + "-peer-configs", Namespace: wgNamespace}, secret)
 				if err != nil {
 					return ""
 				}
-				for _, line := range strings.Split(wgPeer.Status.Config, "\n") {
+				data := string(secret.Data[wgName+"-peer1"])
+				for _, line := range strings.Split(data, "\n") {
 					if strings.Contains(line, "Endpoint") {
 						return line
 					}
 				}
 				return "Endpoint = CONFIG_NOT_SET_ERROR"
-			}, Timeout, Interval).Should(Equal("Endpoint = " + expectedAddress + ":" + fmt.Sprint(expectedPort) + "\""))
+			}, Timeout, Interval).Should(Equal("Endpoint = " + expectedAddress + ":" + fmt.Sprint(expectedPort)))
 
 		})
 		It("sets Custom DNS through Wireguard.Spec.DNS", func() {
@@ -272,12 +273,13 @@ var _ = Describe("wireguard controller", func() {
 			Expect(reconcileServiceWithTypeLoadBalancer(serviceKey, "test-address")).Should(Succeed())
 
 			Eventually(func() string {
-				wgPeer := &v1alpha1.WireguardPeer{}
-				err := k8sClient.Get(context.Background(), wgPeerKey, wgPeer)
+				secret := &corev1.Secret{}
+				err := k8sClient.Get(context.Background(), types.NamespacedName{Name: wgName + "-peer-configs", Namespace: wgNamespace}, secret)
 				if err != nil {
 					return ""
 				}
-				for _, line := range strings.Split(wgPeer.Status.Config, "\n") {
+				data := string(secret.Data[wgName+"-peer1"])
+				for _, line := range strings.Split(data, "\n") {
 					if strings.Contains(line, "DNS") {
 						return line
 					}
@@ -400,22 +402,6 @@ var _ = Describe("wireguard controller", func() {
 				}
 				return peer.Status
 			}, Timeout, Interval).Should(Equal(v1alpha1.WireguardPeerStatus{
-				Config: fmt.Sprintf(`
-echo "
-[Interface]
-PrivateKey = $(kubectl get secret %s --template={{.data.privateKey}} -n %s | base64 -d)
-Address = %s
-DNS = %s, %s.svc.cluster.local
-
-[Peer]
-PublicKey = %s
-AllowedIPs = %s
-Endpoint = %s:%s"`, peerKey.Name+"-peer", peer.Namespace, peer.Spec.Address, dnsServiceIp, peer.Namespace, wgPublicKey, func() string {
-					if peer.Spec.AllowedIPs == "" {
-						return "0.0.0.0/0"
-					}
-					return peer.Spec.AllowedIPs
-				}(), expectedAddress, expectedNodePort),
 				Status:  "ready",
 				Message: "Peer configured",
 			}))
@@ -579,7 +565,7 @@ Endpoint = %s:%s"`, peerKey.Name+"-peer", peer.Namespace, peer.Spec.Address, dns
 			Eventually(func() error {
 				return k8sClient.Get(context.Background(), wgSecretKeyName, wgSecret)
 			}, Timeout, Interval).Should(Succeed())
-			wgPublicKey := string(wgSecret.Data["publicKey"])
+			_ = string(wgSecret.Data["publicKey"])
 
 			Eventually(func() string {
 				Expect(k8sClient.Get(context.Background(), peerKey, peer)).Should(Succeed())
@@ -594,22 +580,6 @@ Endpoint = %s:%s"`, peerKey.Name+"-peer", peer.Namespace, peer.Spec.Address, dns
 				}
 				return peer.Status
 			}, Timeout, Interval).Should(Equal(v1alpha1.WireguardPeerStatus{
-				Config: fmt.Sprintf(`
-echo "
-[Interface]
-PrivateKey = $(kubectl get secret %s --template={{.data.privateKey}} -n %s | base64 -d)
-Address = %s
-DNS = %s, %s.svc.cluster.local
-
-[Peer]
-PublicKey = %s
-AllowedIPs = %s
-Endpoint = %s:%s"`, peerKey.Name+"-peer", peer.Namespace, peer.Spec.Address, dnsServiceIp, peer.Namespace, wgPublicKey, func() string {
-					if peer.Spec.AllowedIPs == "" {
-						return "0.0.0.0/0"
-					}
-					return peer.Spec.AllowedIPs
-				}(), expectedExternalHostName, wg.Status.Port),
 				Status:  "ready",
 				Message: "Peer configured",
 			}))
@@ -666,9 +636,10 @@ Endpoint = %s:%s"`, peerKey.Name+"-peer", peer.Namespace, peer.Spec.Address, dns
 			}, Timeout, Interval).Should(Succeed())
 
 			Eventually(func() string {
-				wgPeer := &v1alpha1.WireguardPeer{}
-				_ = k8sClient.Get(context.Background(), wgPeerKey, wgPeer)
-				for _, line := range strings.Split(wgPeer.Status.Config, "\n") {
+				secret := &corev1.Secret{}
+				_ = k8sClient.Get(context.Background(), types.NamespacedName{Name: wgName + "-peer-configs", Namespace: wgNamespace}, secret)
+				data := string(secret.Data[wgName+"-peer1"])
+				for _, line := range strings.Split(data, "\n") {
 					if strings.Contains(line, "DNS") {
 						return line
 					}
@@ -781,7 +752,7 @@ Endpoint = %s:%s"`, peerKey.Name+"-peer", peer.Namespace, peer.Spec.Address, dns
 			Eventually(func() error {
 				return k8sClient.Get(context.Background(), wgSecretKeyName, wgSecret)
 			}, Timeout, Interval).Should(Succeed())
-			wgPublicKey := string(wgSecret.Data["publicKey"])
+			_ = wgSecret.Data["publicKey"]
 
 			Eventually(func() string {
 				Expect(k8sClient.Get(context.Background(), peerKey, peer)).Should(Succeed())
@@ -796,17 +767,6 @@ Endpoint = %s:%s"`, peerKey.Name+"-peer", peer.Namespace, peer.Spec.Address, dns
 				}
 				return peer.Status
 			}, Timeout, Interval).Should(Equal(v1alpha1.WireguardPeerStatus{
-				Config: fmt.Sprintf(`
-echo "
-[Interface]
-PrivateKey = $(kubectl get secret %s --template={{.data.privateKey}} -n %s | base64 -d)
-Address = %s
-DNS = %s, %s.svc.cluster.local
-
-[Peer]
-PublicKey = %s
-AllowedIPs = 0.0.0.0/0
-Endpoint = %s:%s"`, peerKey.Name+"-peer", peer.Namespace, peer.Spec.Address, dnsServiceIp, peer.Namespace, wgPublicKey, expectedAddress, wg.Status.Port),
 				Status:  "ready",
 				Message: "Peer configured",
 			}))

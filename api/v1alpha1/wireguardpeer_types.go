@@ -97,8 +97,6 @@ type EgressNetworkPolicyTo struct {
 type WireguardPeerStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	// A string field that contains the current configuration for the Wireguard peer.
-	Config string `json:"config,omitempty"`
 	// A string field that represents the current status of the Wireguard peer. This could include values like ready, pending, or error.
 	Status string `json:"status,omitempty"`
 	// A string field that provides additional information about the status of the Wireguard peer. This could include error messages or other information that helps to diagnose issues with the peer.

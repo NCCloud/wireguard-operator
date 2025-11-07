@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nccloud/wireguard-operator/api/v1alpha1"
@@ -191,6 +192,34 @@ func (r *WireguardReconciler) updateWireguardPeers(ctx context.Context, req ctrl
 
 	usedIps := r.getUsedIps(peers)
 
+	// Ensure or create the aggregated peer configs Secret
+	peerCfgSecretName := wireguard.Name + "-peer-configs"
+	peerCfgSecret := &corev1.Secret{}
+	if err := r.Get(ctx, types.NamespacedName{Name: peerCfgSecretName, Namespace: wireguard.Namespace}, peerCfgSecret); err != nil {
+		if errors.IsNotFound(err) {
+			peerCfgSecret = &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      peerCfgSecretName,
+					Namespace: wireguard.Namespace,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: wireguard.APIVersion,
+							Kind:       wireguard.Kind,
+							Name:       wireguard.Name,
+							UID:        wireguard.UID,
+						},
+					},
+				},
+				Type: corev1.SecretTypeOpaque,
+				Data: map[string][]byte{},
+			}
+		} else {
+			return err
+		}
+	}
+	// Always rebuild data from scratch to prune removed peers
+	newPeerCfgData := map[string][]byte{}
+
 	for _, peer := range peers.Items {
 		if peer.Spec.Address == "" {
 			ip, err := getAvaialbleIp("10.8.0.0/24", usedIps)
@@ -219,25 +248,32 @@ func (r *WireguardReconciler) updateWireguardPeers(ctx context.Context, req ctrl
 			allowIps = "0.0.0.0/0"
 		}
 
-		newConfig := fmt.Sprintf(`
-echo "
-[Interface]
-PrivateKey = $(kubectl get secret %s --template={{.data.%s}} -n %s | base64 -d)
+		// Do not store shell-wrapped config in status anymore per upstream PR 212
+
+		// Build pure peer config and write to aggregated Secret <wireguard-name>-peer-configs
+		// Fetch peer private key for inclusion
+		peerPrivSecret := &corev1.Secret{}
+		if err := r.Get(ctx, types.NamespacedName{Name: peer.Spec.PrivateKey.SecretKeyRef.Name, Namespace: peer.Namespace}, peerPrivSecret); err == nil {
+			if v, ok := peerPrivSecret.Data[peer.Spec.PrivateKey.SecretKeyRef.Key]; ok {
+				pureCfg := fmt.Sprintf(`[Interface]
+PrivateKey = %s
 Address = %s
-DNS = %s`, peer.Spec.PrivateKey.SecretKeyRef.Name, peer.Spec.PrivateKey.SecretKeyRef.Key, peer.Namespace, peer.Spec.Address, dnsConfiguration)
-
-		if serverMtu != "" {
-			newConfig = newConfig + "\nMTU = " + serverMtu
-		}
-
-		newConfig = newConfig + fmt.Sprintf(`
+DNS = %s`, strings.TrimSpace(string(v)), peer.Spec.Address, dnsConfiguration)
+				if serverMtu != "" {
+					pureCfg = pureCfg + "\nMTU = " + serverMtu
+				}
+				pureCfg = pureCfg + fmt.Sprintf(`
 
 [Peer]
 PublicKey = %s
 AllowedIPs = %s
-Endpoint = %s:%s"`, serverPublicKey, allowIps, serverAddress, wireguard.Status.Port)
-		if peer.Status.Config != newConfig || peer.Status.Status != v1alpha1.Ready {
-			peer.Status.Config = newConfig
+Endpoint = %s:%s
+`, serverPublicKey, allowIps, serverAddress, wireguard.Status.Port)
+				newPeerCfgData[peer.Name] = []byte(pureCfg)
+			}
+		}
+		if peer.Status.Status != v1alpha1.Ready {
+			// Config removed from status; configs are stored in Secret <wg-name>-peer-configs
 			peer.Status.Status = v1alpha1.Ready
 			peer.Status.Message = "Peer configured"
 			if err := r.Status().Update(ctx, &peer); err != nil {
@@ -246,6 +282,26 @@ Endpoint = %s:%s"`, serverPublicKey, allowIps, serverAddress, wireguard.Status.P
 				}
 				return err
 			}
+		}
+	}
+
+	// Assign rebuilt data map so removed peers are pruned
+	peerCfgSecret.Data = newPeerCfgData
+
+	// Create or update the aggregated peer configs Secret
+	existing := &corev1.Secret{}
+	if err := r.Get(ctx, types.NamespacedName{Name: peerCfgSecret.Name, Namespace: peerCfgSecret.Namespace}, existing); err != nil {
+		if errors.IsNotFound(err) {
+			if err := r.Create(ctx, peerCfgSecret); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	} else {
+		existing.Data = peerCfgSecret.Data
+		if err := r.Update(ctx, existing); err != nil {
+			return err
 		}
 	}
 
