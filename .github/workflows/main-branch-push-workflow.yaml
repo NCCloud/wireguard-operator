@@ -55,8 +55,6 @@ jobs:
           node-version: '20.19.5'
           
       - name: semantic-release
-        env:
-          GITHUB_TOKEN: ${{ secrets.ADMIN_SECRET }}
         run : |
           npm install @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/changelog @semantic-release/git semantic-release/exec
           npx semantic-release
