@@ -5,7 +5,7 @@ on:
       repository:
         description: 'Repository name with owner.'
         required: true
-        default: ${{ github.repository }}
+        default: 'nccloud/wireguard-operator'
         type: string
       branch:
         description: 'The branch, tag or SHA to checkout.'
