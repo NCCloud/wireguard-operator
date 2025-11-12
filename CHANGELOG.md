@@ -1,3 +1,17 @@
+# [2.8.0](https://github.com/jodevsa/wireguard-operator/compare/v2.7.0...v2.8.0) (2025-11-12)
+
+This is first release since forking from [devopsland/wireguard-operator](https://github.com/devops-land/wireguard-operator).
+
+### Features
+* remove external [wireguard exporter](https://github.com/MindFlavor/prometheus_wireguard_exporter) and use built-in exporter from the agent
+* peer configs are now stored in a secret and not shown in status (PR#212 from old repository)
+
+### Cleanups
+* replacing bash code with native (PR#161 from old repository)
+* remove duplicate link syncing (PR#174 from old repository)
+* egress iptables rules streamlined (PR#175 from old repository)
+* removed unused wireguard-manager-config (PR#176 from old repository)
+
 # [2.7.0](https://github.com/jodevsa/wireguard-operator/compare/v2.6.2...v2.7.0) (2024-07-18)
 
 
