@@ -1,0 +1,16 @@
+name: Release
+on:
+  release:
+    types:
+      - published
+
+permissions: write-all
+
+jobs:
+  build-images:
+    uses: ./.github/workflows/build-images.yaml
+    with:
+      latest: true
+      push: true
+      tag: ${{ github.ref_name }}
+      ref: ${{ github.sha }}
