@@ -430,7 +430,11 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			dnsAddress = kubeDnsService.Spec.ClusterIP
 			dnsSearchDomain = fmt.Sprintf("%s.svc.cluster.local", wireguard.Namespace)
 		} else {
-			log.Error(err, "Unable to get kube-dns service")
+			if errors.IsNotFound(err) {
+				log.Info("kube-dns service not found; defaulting DNS to public resolver", "dns", dnsAddress)
+			} else {
+				log.Error(err, "Unable to get kube-dns service; defaulting DNS to public resolver", "dns", dnsAddress)
+			}
 		}
 	}
 
