@@ -117,6 +117,12 @@ spec:
                   be useful to enable if the peers are having problems with sending
                   traffic to the internet.
                 type: boolean
+              ipv6Only:
+                description: |-
+                  IPv6Only indicates that only IPv6 connectivity should be configured for peers.
+                  When true and PeerCIDRv6 is set, the operator will not allocate new IPv4 peer addresses
+                  or configure IPv4 routing/NAT for this instance.
+                type: boolean
               metric:
                 description: WireguardPodSpec defines spec for respective containers
                   created for Wireguard
@@ -184,6 +190,16 @@ spec:
                 additionalProperties:
                   type: string
                 type: object
+              peerCIDR:
+                description: |-
+                  PeerCIDR is the IPv4 CIDR range from which Wireguard peer addresses will be allocated.
+                  If omitted (and IPv6Only is false), the operator will default to 10.8.0.0/24.
+                type: string
+              peerCIDRv6:
+                description: |-
+                  PeerCIDRv6 is the IPv6 CIDR range from which Wireguard peer IPv6 addresses will be allocated.
+                  When set, IPv6 support is enabled for this Wireguard instance.
+                type: string
               port:
                 description: A field that specifies the value to use for a nodePort
                   ServiceType

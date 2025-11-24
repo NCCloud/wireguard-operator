@@ -30,8 +30,10 @@ func IsStateValid(state State) error {
 		return fmt.Errorf("server private key should be of length 44")
 	}
 
-	if state.Server.Status.Address == "" {
-		return fmt.Errorf("server address is not defined")
+	if !state.Server.Spec.IPv6Only || state.Server.Spec.PeerCIDRv6 == "" {
+		if state.Server.Status.Address == "" {
+			return fmt.Errorf("server address is not defined")
+		}
 	}
 
 	if state.Server.Status.Dns == "" {
@@ -39,8 +41,14 @@ func IsStateValid(state State) error {
 	}
 
 	for i, peer := range state.Peers {
-		if peer.Spec.Address == "" {
-			return fmt.Errorf("peer with index %d does not have the address defined", i)
+		if state.Server.Spec.IPv6Only && state.Server.Spec.PeerCIDRv6 != "" {
+			if peer.Spec.AddressV6 == "" {
+				return fmt.Errorf("peer with index %d does not have the IPv6 address defined", i)
+			}
+		} else {
+			if peer.Spec.Address == "" {
+				return fmt.Errorf("peer with index %d does not have the address defined", i)
+			}
 		}
 
 		if peer.Spec.PublicKey == "" {

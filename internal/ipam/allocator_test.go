@@ -88,11 +88,13 @@ func TestGetUsedIPs(t *testing.T) {
 
 	tests := []struct {
 		name     string
+		cidr     string
 		peers    *v1alpha1.WireguardPeerList
 		expected int // number of expected IPs (including reserved ones)
 	}{
 		{
-			name: "no peers",
+			name: "no peers default cidr",
+			cidr: DefaultPeerCIDR4,
 			peers: &v1alpha1.WireguardPeerList{
 				Items: []v1alpha1.WireguardPeer{},
 			},
@@ -100,6 +102,7 @@ func TestGetUsedIPs(t *testing.T) {
 		},
 		{
 			name: "peers with addresses",
+			cidr: DefaultPeerCIDR4,
 			peers: &v1alpha1.WireguardPeerList{
 				Items: []v1alpha1.WireguardPeer{
 					{
@@ -116,6 +119,7 @@ func TestGetUsedIPs(t *testing.T) {
 		},
 		{
 			name: "peers with some empty addresses",
+			cidr: DefaultPeerCIDR4,
 			peers: &v1alpha1.WireguardPeerList{
 				Items: []v1alpha1.WireguardPeer{
 					{
@@ -134,13 +138,58 @@ func TestGetUsedIPs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			usedIPs := allocator.GetUsedIPs(tt.peers)
+			usedIPs := allocator.GetUsedIPs(tt.cidr, tt.peers)
 			if len(usedIPs) != tt.expected {
 				t.Errorf("expected %d used IPs, got %d", tt.expected, len(usedIPs))
 			}
 			// Verify reserved IPs are always included
 			if usedIPs[0] != "10.8.0.0" || usedIPs[1] != "10.8.0.1" {
 				t.Errorf("reserved IPs not found at the beginning of the list")
+			}
+		})
+	}
+}
+
+func TestGetUsedIPv6IPs(t *testing.T) {
+	allocator := NewAllocator()
+
+	const cidr = "fd00::/64"
+
+	tests := []struct {
+		name           string
+		peers          *v1alpha1.WireguardPeerList
+		expectedMinLen int
+	}{
+		{
+			name: "no peers",
+			peers: &v1alpha1.WireguardPeerList{
+				Items: []v1alpha1.WireguardPeer{},
+			},
+			expectedMinLen: 2, // network + first host
+		},
+		{
+			name: "peers with v6 addresses",
+			peers: &v1alpha1.WireguardPeerList{
+				Items: []v1alpha1.WireguardPeer{
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "peer1"},
+						Spec:       v1alpha1.WireguardPeerSpec{AddressV6: "fd00::2"},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "peer2"},
+						Spec:       v1alpha1.WireguardPeerSpec{AddressV6: "fd00::3"},
+					},
+				},
+			},
+			expectedMinLen: 4, // network + first host + 2 peers
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usedIPs := allocator.GetUsedIPv6IPs(cidr, tt.peers)
+			if len(usedIPs) != tt.expectedMinLen {
+				t.Errorf("expected %d used IPv6s, got %d", tt.expectedMinLen, len(usedIPs))
 			}
 		})
 	}

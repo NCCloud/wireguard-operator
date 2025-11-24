@@ -777,6 +777,258 @@ var _ = Describe("wireguard controller", func() {
 
 		})
 
+		It("allocates IPv4 peer addresses from custom PeerCIDR in IPv4-only mode", func() {
+			wgKey := types.NamespacedName{
+				Name:      wgName,
+				Namespace: wgNamespace,
+			}
+
+			const customCIDR = "10.9.0.0/24"
+
+			created := &v1alpha1.Wireguard{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      wgKey.Name,
+					Namespace: wgKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardSpec{
+					ServiceType: corev1.ServiceTypeClusterIP,
+					Address:     "test-address",
+					PeerCIDR:    customCIDR,
+				},
+			}
+			expectedLabels := map[string]string{"app": "wireguard", "instance": wgKey.Name}
+
+			Expect(k8sClient.Create(context.Background(), created)).Should(Succeed())
+
+			// service created
+			serviceName := wgKey.Name + "-svc"
+			serviceKey := types.NamespacedName{
+				Namespace: wgKey.Namespace,
+				Name:      serviceName,
+			}
+
+			// match labels
+			Eventually(func() map[string]string {
+				svc := &corev1.Service{}
+				//nolint:errcheck
+				k8sClient.Get(context.Background(), serviceKey, svc)
+				return svc.Spec.Selector
+			}, Timeout, Interval).Should(BeEquivalentTo(expectedLabels))
+
+			// match service type
+			Eventually(func() corev1.ServiceType {
+				svc := &corev1.Service{}
+				//nolint:errcheck
+				k8sClient.Get(context.Background(), serviceKey, svc)
+				return svc.Spec.Type
+			}, Timeout, Interval).Should(Equal(corev1.ServiceTypeClusterIP))
+
+			Expect(reconcileServiceWithClusterIP(serviceKey, 51820)).Should(Succeed())
+
+			// create peer
+			peerKey := types.NamespacedName{
+				Name:      wgKey.Name + "peer-v4only",
+				Namespace: wgKey.Namespace,
+			}
+			peer := &v1alpha1.WireguardPeer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      peerKey.Name,
+					Namespace: peerKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardPeerSpec{
+					WireguardRef: wgKey.Name,
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), peer)).Should(Succeed())
+
+			// first usable IP in 10.9.0.0/24 after network (.0) and gateway (.1) is .2
+			Eventually(func() string {
+				Expect(k8sClient.Get(context.Background(), peerKey, peer)).Should(Succeed())
+				return peer.Spec.Address
+			}, Timeout, Interval).Should(Equal("10.9.0.2"))
+
+			Eventually(func() string {
+				Expect(k8sClient.Get(context.Background(), peerKey, peer)).Should(Succeed())
+				return peer.Spec.AddressV6
+			}, Timeout, Interval).Should(Equal(""))
+		})
+
+		It("allocates both IPv4 and IPv6 addresses in dual-stack mode", func() {
+			wgKey := types.NamespacedName{
+				Name:      wgName,
+				Namespace: wgNamespace,
+			}
+
+			const (
+				v4CIDR = "10.8.0.0/24"
+				v6CIDR = "fd00::/64"
+			)
+
+			created := &v1alpha1.Wireguard{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      wgKey.Name,
+					Namespace: wgKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardSpec{
+					ServiceType: corev1.ServiceTypeClusterIP,
+					Address:     "dualstack-address",
+					PeerCIDR:    v4CIDR,
+					PeerCIDRv6:  v6CIDR,
+				},
+			}
+			expectedLabels := map[string]string{"app": "wireguard", "instance": wgKey.Name}
+
+			Expect(k8sClient.Create(context.Background(), created)).Should(Succeed())
+
+			serviceName := wgKey.Name + "-svc"
+			serviceKey := types.NamespacedName{
+				Namespace: wgKey.Namespace,
+				Name:      serviceName,
+			}
+
+			// match labels
+			Eventually(func() map[string]string {
+				svc := &corev1.Service{}
+				//nolint:errcheck
+				k8sClient.Get(context.Background(), serviceKey, svc)
+				return svc.Spec.Selector
+			}, Timeout, Interval).Should(BeEquivalentTo(expectedLabels))
+
+			// match service type
+			Eventually(func() corev1.ServiceType {
+				svc := &corev1.Service{}
+				//nolint:errcheck
+				k8sClient.Get(context.Background(), serviceKey, svc)
+				return svc.Spec.Type
+			}, Timeout, Interval).Should(Equal(corev1.ServiceTypeClusterIP))
+
+			Expect(reconcileServiceWithClusterIP(serviceKey, 51820)).Should(Succeed())
+
+			// create peer
+			peerKey := types.NamespacedName{
+				Name:      wgKey.Name + "peer-dualstack",
+				Namespace: wgKey.Namespace,
+			}
+			peer := &v1alpha1.WireguardPeer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      peerKey.Name,
+					Namespace: peerKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardPeerSpec{
+					WireguardRef: wgKey.Name,
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), peer)).Should(Succeed())
+
+			// v4: 10.8.0.2, v6: fd00::2 based on reserved network + first host
+			Eventually(func() []string {
+				Expect(k8sClient.Get(context.Background(), peerKey, peer)).Should(Succeed())
+				return []string{peer.Spec.Address, peer.Spec.AddressV6}
+			}, Timeout, Interval).Should(Equal([]string{"10.8.0.2", "fd00::2"}))
+
+			// Ensure the peer-config secret has both addresses in the Address line.
+			Eventually(func() string {
+				secret := &corev1.Secret{}
+				_ = k8sClient.Get(context.Background(), types.NamespacedName{
+					Name:      wgName + "-peer-configs",
+					Namespace: wgNamespace,
+				}, secret)
+				data := string(secret.Data[peerKey.Name])
+				for _, line := range strings.Split(data, "\n") {
+					if strings.HasPrefix(line, "Address = ") {
+						return line
+					}
+				}
+				return ""
+			}, Timeout, Interval).Should(Equal("Address = 10.8.0.2, fd00::2"))
+		})
+
+		It("allocates only IPv6 addresses when ipv6Only is true", func() {
+			wgKey := types.NamespacedName{
+				Name:      wgName,
+				Namespace: wgNamespace,
+			}
+
+			const v6CIDR = "fd00:1::/64"
+
+			created := &v1alpha1.Wireguard{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      wgKey.Name,
+					Namespace: wgKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardSpec{
+					ServiceType: corev1.ServiceTypeClusterIP,
+					PeerCIDRv6:  v6CIDR,
+					IPv6Only:    true,
+				},
+			}
+			expectedLabels := map[string]string{"app": "wireguard", "instance": wgKey.Name}
+
+			Expect(k8sClient.Create(context.Background(), created)).Should(Succeed())
+
+			serviceName := wgKey.Name + "-svc"
+			serviceKey := types.NamespacedName{
+				Namespace: wgKey.Namespace,
+				Name:      serviceName,
+			}
+
+			// match labels
+			Eventually(func() map[string]string {
+				svc := &corev1.Service{}
+				//nolint:errcheck
+				k8sClient.Get(context.Background(), serviceKey, svc)
+				return svc.Spec.Selector
+			}, Timeout, Interval).Should(BeEquivalentTo(expectedLabels))
+
+			// match service type
+			Eventually(func() corev1.ServiceType {
+				svc := &corev1.Service{}
+				//nolint:errcheck
+				k8sClient.Get(context.Background(), serviceKey, svc)
+				return svc.Spec.Type
+			}, Timeout, Interval).Should(Equal(corev1.ServiceTypeClusterIP))
+
+			Expect(reconcileServiceWithClusterIP(serviceKey, 51820)).Should(Succeed())
+
+			// create peer
+			peerKey := types.NamespacedName{
+				Name:      wgKey.Name + "peer-v6only",
+				Namespace: wgKey.Namespace,
+			}
+			peer := &v1alpha1.WireguardPeer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      peerKey.Name,
+					Namespace: peerKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardPeerSpec{
+					WireguardRef: wgKey.Name,
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), peer)).Should(Succeed())
+
+			// No IPv4 address should be allocated; only IPv6.
+			Eventually(func() []string {
+				Expect(k8sClient.Get(context.Background(), peerKey, peer)).Should(Succeed())
+				return []string{peer.Spec.Address, peer.Spec.AddressV6}
+			}, Timeout, Interval).Should(Equal([]string{"", "fd00:1::2"}))
+
+			// Ensure the peer-config secret Address line contains only the IPv6 address.
+			Eventually(func() string {
+				secret := &corev1.Secret{}
+				_ = k8sClient.Get(context.Background(), types.NamespacedName{
+					Name:      wgName + "-peer-configs",
+					Namespace: wgNamespace,
+				}, secret)
+				data := string(secret.Data[peerKey.Name])
+				for _, line := range strings.Split(data, "\n") {
+					if strings.HasPrefix(line, "Address = ") {
+						return line
+					}
+				}
+				return ""
+			}, Timeout, Interval).Should(Equal("Address = fd00:1::2"))
+		})
+
 		for _, useWgUserspace := range []bool{true, false} {
 			testTextPrefix := "uses"
 			if !useWgUserspace {

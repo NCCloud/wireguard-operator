@@ -125,3 +125,16 @@ func TestIptableRules(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerateIptableRulesFromPeersUsesProvidedCIDR(t *testing.T) {
+	peers := []v1alpha1.WireguardPeer{}
+	const cidr = "192.168.100.0/24"
+	rules := GenerateIptableRulesFromPeers(cidr, "1.2.3.4", "8.8.8.8", peers)
+	if !containsSubstring(rules, "-A POSTROUTING -s "+cidr+" -o eth0 -j MASQUERADE") {
+		t.Fatalf("expected NAT rule to use cidr %s, got: %s", cidr, rules)
+	}
+}
+
+func containsSubstring(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(sub) == 0 || (len(s) > len(sub) && (containsSubstring(s[1:], sub) || s[:len(sub)] == sub)))
+}

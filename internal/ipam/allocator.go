@@ -19,14 +19,15 @@ package ipam
 
 import (
 	"fmt"
+	"net/netip"
 
 	"github.com/korylprince/ipnetgen"
 	"github.com/nccloud/wireguard-operator/api/v1alpha1"
 )
 
 const (
-	// DefaultCIDR is the default CIDR range for Wireguard peer IPs.
-	DefaultCIDR = "10.8.0.0/24"
+	// DefaultPeerCIDR4 is the default IPv4 CIDR range for Wireguard peer IPs.
+	DefaultPeerCIDR4 = "10.8.0.0/24"
 )
 
 // Allocator manages IP address allocation for Wireguard peers.
@@ -55,11 +56,11 @@ func (a *Allocator) AllocateIP(cidr string, usedIPs []string) (string, error) {
 	return "", fmt.Errorf("no available IP found in %s", cidr)
 }
 
-// GetUsedIPs returns a list of IP addresses that are currently in use by peers.
-// It includes the network and gateway addresses (10.8.0.0 and 10.8.0.1) as reserved.
-func (a *Allocator) GetUsedIPs(peers *v1alpha1.WireguardPeerList) []string {
-	// Reserve network and gateway addresses
-	usedIPs := []string{"10.8.0.0", "10.8.0.1"}
+// GetUsedIPs returns a list of IPv4 addresses that are currently in use by peers.
+// It includes the derived network and gateway addresses (first host) from the
+// provided CIDR as reserved.
+func (a *Allocator) GetUsedIPs(cidr string, peers *v1alpha1.WireguardPeerList) []string {
+	usedIPs := deriveReservedIPs(cidr)
 
 	for _, peer := range peers.Items {
 		if peer.Spec.Address != "" {
@@ -68,6 +69,41 @@ func (a *Allocator) GetUsedIPs(peers *v1alpha1.WireguardPeerList) []string {
 	}
 
 	return usedIPs
+}
+
+// GetUsedIPv6IPs returns a list of IPv6 addresses that are currently in use by peers.
+// It includes the derived network and gateway addresses (first host) from the
+// provided IPv6 CIDR as reserved.
+func (a *Allocator) GetUsedIPv6IPs(cidr string, peers *v1alpha1.WireguardPeerList) []string {
+	usedIPs := deriveReservedIPs(cidr)
+
+	for _, peer := range peers.Items {
+		if peer.Spec.AddressV6 != "" {
+			usedIPs = append(usedIPs, peer.Spec.AddressV6)
+		}
+	}
+
+	return usedIPs
+}
+
+// deriveReservedIPs returns a slice containing the network address and the first
+// host address derived from the given CIDR. If the CIDR cannot be parsed, it
+// returns an empty slice and leaves validation to callers of AllocateIP.
+func deriveReservedIPs(cidr string) []string {
+	if cidr == "" {
+		return []string{}
+	}
+
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return []string{}
+	}
+
+	prefix = prefix.Masked()
+	network := prefix.Addr()
+	gateway := network.Next()
+
+	return []string{network.String(), gateway.String()}
 }
 
 // isUsed checks if an IP address is in the list of used IPs.

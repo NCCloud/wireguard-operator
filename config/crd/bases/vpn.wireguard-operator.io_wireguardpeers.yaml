@@ -45,6 +45,9 @@ spec:
                   Important: Run "make" to regenerate code after modifying this file
                   The address of the peer.
                 type: string
+              addressV6:
+                description: The IPv6 address of the peer.
+                type: string
               allowedIPs:
                 description: The AllowedIPs of the peer.
                 type: string

@@ -3,6 +3,7 @@ package wireguard
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"syscall"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/nccloud/wireguard-operator/api/v1alpha1"
 	"github.com/nccloud/wireguard-operator/internal/agent"
+	"github.com/nccloud/wireguard-operator/internal/ipam"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 	"golang.zx2c4.com/wireguard/wgctrl"
@@ -20,13 +22,13 @@ import (
 
 const MTU = 1420
 
-func syncRoute(_ agent.State, iface string) error {
+func syncRoute(iface string, cidr string, gw net.IP, family int) error {
 	link, err := netlink.LinkByName(iface)
 	if err != nil {
 		return err
 	}
 
-	routes, err := netlink.RouteList(link, syscall.AF_INET)
+	routes, err := netlink.RouteList(link, family)
 	if err != nil {
 		return err
 	}
@@ -36,10 +38,15 @@ func syncRoute(_ agent.State, iface string) error {
 			return nil
 		}
 	}
+	_, dst, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return err
+	}
+
 	route := netlink.Route{
 		LinkIndex: link.Attrs().Index,
-		Dst:       &getIP("10.8.0.0/24")[0],
-		Gw:        net.ParseIP("10.8.0.1"),
+		Dst:       dst,
+		Gw:        gw,
 	}
 
 	err = netlink.RouteAdd(&route)
@@ -50,13 +57,13 @@ func syncRoute(_ agent.State, iface string) error {
 	return nil
 }
 
-func syncAddress(_ agent.State, iface string) error {
+func syncAddress(iface string, ipWithMask *net.IPNet, family int) error {
 	link, err := netlink.LinkByName(iface)
 	if err != nil {
 		return err
 	}
 
-	addresses, err := netlink.AddrList(link, syscall.AF_INET)
+	addresses, err := netlink.AddrList(link, family)
 	if err != nil {
 		return nil
 	}
@@ -66,7 +73,7 @@ func syncAddress(_ agent.State, iface string) error {
 	}
 
 	if err := netlink.AddrAdd(link, &netlink.Addr{
-		IPNet: &getIP("10.8.0.1/32")[0],
+		IPNet: ipWithMask,
 	}); err != nil {
 		return fmt.Errorf("netlink addr add: %w", err)
 	}
@@ -230,17 +237,57 @@ func (wg *Wireguard) Sync(state agent.State) error {
 		return err
 	}
 
-	// set wg0 gateway as 10.8.0.1/32
-	err = syncAddress(state, wg.Iface)
-	if err != nil {
-		return err
+	spec := state.Server.Spec
+
+	enableV6 := spec.PeerCIDRv6 != ""
+	ipv6Only := spec.IPv6Only && enableV6
+
+	// IPv4 configuration (skip in IPv6-only mode).
+	if !ipv6Only {
+		cidr4 := spec.PeerCIDR
+		if cidr4 == "" {
+			cidr4 = ipam.DefaultPeerCIDR4
+		}
+		if cidr4 != "" {
+			prefix4, err := netip.ParsePrefix(cidr4)
+			if err != nil {
+				return fmt.Errorf("failed to parse IPv4 CIDR %q: %w", cidr4, err)
+			}
+
+			addr4Net, gw4, err := gatewayIPFromPrefix(prefix4)
+			if err != nil {
+				return err
+			}
+
+			if err := syncAddress(wg.Iface, addr4Net, syscall.AF_INET); err != nil {
+				return err
+			}
+			if err := syncRoute(wg.Iface, cidr4, gw4, syscall.AF_INET); err != nil {
+				return err
+			}
+		}
 	}
 
-	// route all traffic coming from 10.8.0.0/24 via gateway 10.8.0.1 on wg0
-	err = syncRoute(state, wg.Iface)
+	// IPv6 configuration.
+	if enableV6 {
+		cidr6 := spec.PeerCIDRv6
 
-	if err != nil {
-		return err
+		prefix6, err := netip.ParsePrefix(cidr6)
+		if err != nil {
+			return fmt.Errorf("failed to parse IPv6 CIDR %q: %w", cidr6, err)
+		}
+
+		addr6Net, gw6, err := gatewayIPFromPrefix(prefix6)
+		if err != nil {
+			return err
+		}
+
+		if err := syncAddress(wg.Iface, addr6Net, syscall.AF_INET6); err != nil {
+			return err
+		}
+		if err := syncRoute(wg.Iface, cidr6, gw6, syscall.AF_INET6); err != nil {
+			return err
+		}
 	}
 
 	// sync wg configuration
@@ -256,6 +303,34 @@ func getIP(ip string) []net.IPNet {
 	_, ipnet, _ := net.ParseCIDR(ip)
 
 	return []net.IPNet{*ipnet}
+}
+
+func gatewayIPFromPrefix(prefix netip.Prefix) (*net.IPNet, net.IP, error) {
+	prefix = prefix.Masked()
+	addr := prefix.Addr()
+
+	switch {
+	case addr.Is4():
+		gw := addr.Next()
+		if !gw.Is4() {
+			return nil, nil, fmt.Errorf("failed to derive IPv4 gateway for prefix %q", prefix.String())
+		}
+		b := gw.As4()
+		ip := net.IPv4(b[0], b[1], b[2], b[3])
+		return &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)}, ip, nil
+
+	case addr.Is6() && !addr.Is4():
+		gw := addr.Next()
+		if !gw.Is6() || gw.Is4() {
+			return nil, nil, fmt.Errorf("failed to derive IPv6 gateway for prefix %q", prefix.String())
+		}
+		b := gw.As16()
+		ip := net.IP(b[:])
+		return &net.IPNet{IP: ip, Mask: net.CIDRMask(128, 128)}, ip, nil
+
+	default:
+		return nil, nil, fmt.Errorf("unsupported address family for prefix %q", prefix.String())
+	}
 }
 
 func createPeersConfiguration(state agent.State, iface string) ([]wgtypes.PeerConfig, error) {
@@ -302,15 +377,34 @@ func createPeersConfiguration(state agent.State, iface string) ([]wgtypes.PeerCo
 					PublicKey:  peer.PublicKey,
 				}
 				peerConfigurationByPublicKey[p.PublicKey.String()] = p
-			} else if peer.AllowedIPs[0].IP.String() != peerState.Spec.Address {
-				// update peer
-				p := wgtypes.PeerConfig{
-					UpdateOnly:        true,
-					AllowedIPs:        getIP(peerState.Spec.Address + "/32"),
-					PublicKey:         peer.PublicKey,
-					ReplaceAllowedIPs: true,
+			} else {
+				var desiredAllowed []net.IPNet
+				if peerState.Spec.Address != "" {
+					desiredAllowed = append(desiredAllowed, getIP(peerState.Spec.Address+"/32")...)
 				}
-				peerConfigurationByPublicKey[p.PublicKey.String()] = p
+				if peerState.Spec.AddressV6 != "" {
+					desiredAllowed = append(desiredAllowed, getIP(peerState.Spec.AddressV6+"/128")...)
+				}
+
+				// Only update if AllowedIPs differ.
+				same := len(desiredAllowed) == len(peer.AllowedIPs)
+				if same {
+					for i := range desiredAllowed {
+						if !desiredAllowed[i].IP.Equal(peer.AllowedIPs[i].IP) || desiredAllowed[i].Mask.String() != peer.AllowedIPs[i].Mask.String() {
+							same = false
+							break
+						}
+					}
+				}
+				if !same {
+					p := wgtypes.PeerConfig{
+						UpdateOnly:        true,
+						AllowedIPs:        desiredAllowed,
+						PublicKey:         peer.PublicKey,
+						ReplaceAllowedIPs: true,
+					}
+					peerConfigurationByPublicKey[p.PublicKey.String()] = p
+				}
 			}
 		}
 	}
@@ -324,7 +418,7 @@ func createPeersConfiguration(state agent.State, iface string) ([]wgtypes.PeerCo
 			continue
 		}
 
-		if peer.Spec.Address == "" {
+		if peer.Spec.Address == "" && peer.Spec.AddressV6 == "" {
 			continue
 		}
 		key, err := wgtypes.ParseKey(peer.Spec.PublicKey)
@@ -338,8 +432,15 @@ func createPeersConfiguration(state agent.State, iface string) ([]wgtypes.PeerCo
 		}
 
 		// create peer
+		var allowed []net.IPNet
+		if peer.Spec.Address != "" {
+			allowed = append(allowed, getIP(peer.Spec.Address+"/32")...)
+		}
+		if peer.Spec.AddressV6 != "" {
+			allowed = append(allowed, getIP(peer.Spec.AddressV6+"/128")...)
+		}
 		p := wgtypes.PeerConfig{
-			AllowedIPs: getIP(peer.Spec.Address + "/32"),
+			AllowedIPs: allowed,
 			PublicKey:  key,
 		}
 		peerConfigurationByPublicKey[p.PublicKey.String()] = p

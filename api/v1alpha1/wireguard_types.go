@@ -34,6 +34,16 @@ type WireguardSpec struct {
 	Mtu string `json:"mtu,omitempty"`
 	// A string field that specifies the address for the Wireguard VPN server. This is the public IP address or hostname that peers will use to connect to the VPN.
 	Address string `json:"address,omitempty"`
+	// PeerCIDR is the IPv4 CIDR range from which Wireguard peer addresses will be allocated.
+	// If omitted (and IPv6Only is false), the operator will default to 10.8.0.0/24.
+	PeerCIDR string `json:"peerCIDR,omitempty"`
+	// PeerCIDRv6 is the IPv6 CIDR range from which Wireguard peer IPv6 addresses will be allocated.
+	// When set, IPv6 support is enabled for this Wireguard instance.
+	PeerCIDRv6 string `json:"peerCIDRv6,omitempty"`
+	// IPv6Only indicates that only IPv6 connectivity should be configured for peers.
+	// When true and PeerCIDRv6 is set, the operator will not allocate new IPv4 peer addresses
+	// or configure IPv4 routing/NAT for this instance.
+	IPv6Only bool `json:"ipv6Only,omitempty"`
 	// A string field that specifies the DNS server(s) to be used by the peers.
 	Dns string `json:"dns,omitempty"`
 	// A string field that specifies the DNS search domain(s) to be used by the peers.
