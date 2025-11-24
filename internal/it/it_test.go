@@ -74,4 +74,37 @@ spec:
 		Expect(err).NotTo(HaveOccurred())
 		Expect(logs).To(ContainSubstring("wireguard_"))
 	})
+
+	It("exposes controller manager metrics", func() {
+		// Ensure the controller-manager Deployment is ready (BeforeSuite already waits for it)
+
+		controllerMetricsCheckPod := `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: controller-metrics-check
+  namespace: wireguard-system
+spec:
+  restartPolicy: Never
+  serviceAccountName: wireguard-metrics-reader
+  containers:
+  - name: curl
+    image: curlimages/curl:8.17.0
+    command: ["sh","-c"]
+    args:
+    - >
+      TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token);
+      curl -sS -H "Authorization: Bearer $TOKEN" http://wireguard-controller-manager-metrics-service.wireguard-system.svc.cluster.local:8080/metrics |
+      grep -E 'controller_runtime_reconcile_total|process_cpu_seconds_total'
+`
+		output, err := KubectlApply(controllerMetricsCheckPod, "wireguard-system")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(output).To(Equal("pod/controller-metrics-check created"))
+
+		WaitForPodSucceeded("controller-metrics-check", "wireguard-system")
+
+		logs, err := KubectlLogs("controller-metrics-check", "wireguard-system")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(logs).To(ContainSubstring("controller_runtime_reconcile_total"))
+	})
 })

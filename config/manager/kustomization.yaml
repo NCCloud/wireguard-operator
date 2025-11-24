@@ -9,4 +9,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: ghcr.io/nccloud/wireguard-operator/manager
-  newTag: main
+  newTag: latest

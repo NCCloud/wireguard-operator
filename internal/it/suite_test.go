@@ -227,13 +227,13 @@ var _ = BeforeSuite(func() {
 		"customresourcedefinition.apiextensions.k8s.io/wireguardpeers.vpn.wireguard-operator.io",
 		"customresourcedefinition.apiextensions.k8s.io/wireguards.vpn.wireguard-operator.io",
 		"serviceaccount/wireguard-controller-manager",
+		"serviceaccount/wireguard-metrics-reader",
 		"role.rbac.authorization.k8s.io/wireguard-leader-election-role",
 		"clusterrole.rbac.authorization.k8s.io/wireguard-manager-role",
 		"clusterrole.rbac.authorization.k8s.io/wireguard-metrics-reader",
-		"clusterrole.rbac.authorization.k8s.io/wireguard-proxy-role",
 		"rolebinding.rbac.authorization.k8s.io/wireguard-leader-election-rolebinding",
 		"clusterrolebinding.rbac.authorization.k8s.io/wireguard-manager-rolebinding",
-		"clusterrolebinding.rbac.authorization.k8s.io/wireguard-proxy-rolebinding",
+		"clusterrolebinding.rbac.authorization.k8s.io/wireguard-metrics-reader",
 		"service/wireguard-controller-manager-metrics-service",
 		"deployment.apps/wireguard-controller-manager",
 	}
@@ -267,6 +267,10 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
 	if !e2eEnabled {
+		return
+	}
+	cleanup := os.Getenv("SKIP_CLEANUP")
+	if cleanup == "1" || strings.EqualFold(cleanup, "true") {
 		return
 	}
 	err := testProvider.Delete(testClusterName, kubeConfigPath)

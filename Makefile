@@ -152,9 +152,9 @@ run-e2e: $(KIND)
 	AGENT_IMAGE=${AGENT_IMAGE} $(MAKE) update-agent-image
 	MANAGER_IMAGE=${MANAGER_IMAGE} $(MAKE) update-manager-image
 	$(KUSTOMIZE) build config/default > release_it.yaml
-	git checkout ./config/default/manager_auth_proxy_patch.yaml
+	git checkout ./config/default/manager_args_patch.yaml
 	git checkout ./config/manager/kustomization.yaml
-	KUBECONFIG=$(HOME)/.kube/config KUBE_CONFIG=$(HOME)/.kube/config KIND_BIN=${KIND} WIREGUARD_OPERATOR_RELEASE_PATH="../../release_it.yaml" AGENT_IMAGE=${AGENT_IMAGE} MANAGER_IMAGE=${MANAGER_IMAGE} go test -tags=e2e ./internal/it/ -v -count=1
+	KUBECONFIG=$(HOME)/.kube/config KUBE_CONFIG=$(HOME)/.kube/config KIND_BIN=${KIND} WIREGUARD_OPERATOR_RELEASE_PATH="../../release_it.yaml" AGENT_IMAGE=${AGENT_IMAGE} MANAGER_IMAGE=${MANAGER_IMAGE} SKIP_CLEANUP=${SKIP_CLEANUP} go test -tags=e2e ./internal/it/ -v -count=1
 
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
@@ -170,7 +170,7 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 
 update-agent-image: kustomize
 	## TODO: Simplify later
-	AGENT_IMAGE=$(AGENT_IMAGE) envsubst < ./config/default/manager_auth_proxy_patch.yaml.template > ./config/default/manager_auth_proxy_patch.yaml
+	AGENT_IMAGE=$(AGENT_IMAGE) envsubst < ./config/default/manager_args_patch.yaml.template > ./config/default/manager_args_patch.yaml
 
 update-manager-image: kustomize
 	$(info MANAGER_IMAGE: "$(MANAGER_IMAGE)")
@@ -178,7 +178,7 @@ update-manager-image: kustomize
 
 generate-release-file: kustomize update-agent-image update-manager-image
 	$(KUSTOMIZE) build config/default > release.yaml
-	git checkout ./config/default/manager_auth_proxy_patch.yaml
+	git checkout ./config/default/manager_args_patch.yaml
 	git checkout ./config/manager/kustomization.yaml
 
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
