@@ -1,3 +1,19 @@
+# [2.9.0](https://github.com/jodevsa/wireguard-operator/compare/v2.7.0...v2.8.0) (2025-11-26)
+
+This release adds some long requested features like ability to specify a custom CIDR range for Wireguard tunnel and adds support for using IPv6 with Wireguard.
+
+### Features
+* add support for specifying custom CIDR ranges in the `Wireguard` resource
+* IPv6 support added
+* added Helm [chart](https://github.com/NCCloud/charts/tree/main/charts/wireguard-operator) for installing `wireguard-operator`
+
+### Changes
+* removed `kube-rbac-proxy` sidecar in favor of `contoller-runtime` native filter
+
+### Bug fixes
+* have a more helpful message when `kube-dns` service is not found, instead of a reconile failure
+
+
 # [2.8.0](https://github.com/jodevsa/wireguard-operator/compare/v2.7.0...v2.8.0) (2025-11-12)
 
 This is first release since forking from [devopsland/wireguard-operator](https://github.com/devops-land/wireguard-operator).

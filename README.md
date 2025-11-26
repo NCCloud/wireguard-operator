@@ -1,5 +1,5 @@
 # Wireguard Operator
-<img width="1394" alt="Screenshot 2022-02-26 at 02 05 29" src="https://user-images.githubusercontent.com/14154314/177223431-445fbbb1-ff5b-4fd5-86b3-850b81f0a98f.png">
+<img width="1394" alt="Grafana dashboard screenshot" src="readme/screenshot.png">
 
 Painless deployment of wireguard on kubernetes
 
@@ -82,12 +82,12 @@ Endpoint = 32.121.45.102:51820
 
 ## How to deploy
 ```
-kubectl apply -f https://github.com/nccloud/wireguard-operator/releases/download/v2.8.0/release.yaml
+kubectl apply -f https://github.com/nccloud/wireguard-operator/releases/download/v2.9.0/release.yaml
 ```
 
 ## How to remove
 ```
-kubectl delete -f https://github.com/nccloud/wireguard-operator/releases/download/v2.8.0/release.yaml
+kubectl delete -f https://github.com/nccloud/wireguard-operator/releases/download/v2.9.0/release.yaml
 ```
 
 ## How to collaborate

@@ -51,6 +51,9 @@ spec:
                   Important: Run "make" to regenerate code after modifying this file
                   The address of the peer.
                 type: string
+              addressV6:
+                description: The IPv6 address of the peer.
+                type: string
               allowedIPs:
                 description: The AllowedIPs of the peer.
                 type: string
@@ -367,6 +370,12 @@ spec:
                   be useful to enable if the peers are having problems with sending
                   traffic to the internet.
                 type: boolean
+              ipv6Only:
+                description: |-
+                  IPv6Only indicates that only IPv6 connectivity should be configured for peers.
+                  When true and PeerCIDRv6 is set, the operator will not allocate new IPv4 peer addresses
+                  or configure IPv4 routing/NAT for this instance.
+                type: boolean
               metric:
                 description: WireguardPodSpec defines spec for respective containers
                   created for Wireguard
@@ -434,6 +443,16 @@ spec:
                 additionalProperties:
                   type: string
                 type: object
+              peerCIDR:
+                description: |-
+                  PeerCIDR is the IPv4 CIDR range from which Wireguard peer addresses will be allocated.
+                  If omitted (and IPv6Only is false), the operator will default to 10.8.0.0/24.
+                type: string
+              peerCIDRv6:
+                description: |-
+                  PeerCIDRv6 is the IPv6 CIDR range from which Wireguard peer IPv6 addresses will be allocated.
+                  When set, IPv6 support is enabled for this Wireguard instance.
+                type: string
               port:
                 description: A field that specifies the value to use for a nodePort
                   ServiceType
@@ -577,6 +596,12 @@ metadata:
   name: wireguard-controller-manager
   namespace: wireguard-system
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wireguard-metrics-reader
+  namespace: wireguard-system
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -656,6 +681,18 @@ rules:
   - update
   - watch
 - apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+- apiGroups:
   - vpn.wireguard-operator.io
   resources:
   - wireguardpeers
@@ -696,24 +733,6 @@ rules:
   - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: wireguard-proxy-role
-rules:
-- apiGroups:
-  - authentication.k8s.io
-  resources:
-  - tokenreviews
-  verbs:
-  - create
-- apiGroups:
-  - authorization.k8s.io
-  resources:
-  - subjectaccessreviews
-  verbs:
-  - create
----
-apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: wireguard-leader-election-rolebinding
@@ -743,14 +762,14 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: wireguard-proxy-rolebinding
+  name: wireguard-metrics-reader
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: wireguard-proxy-role
+  name: wireguard-metrics-reader
 subjects:
 - kind: ServiceAccount
-  name: wireguard-controller-manager
+  name: wireguard-metrics-reader
   namespace: wireguard-system
 ---
 apiVersion: v1
@@ -762,10 +781,10 @@ metadata:
   namespace: wireguard-system
 spec:
   ports:
-  - name: https
-    port: 8443
+  - name: metrics
+    port: 8080
     protocol: TCP
-    targetPort: https
+    targetPort: 8080
   selector:
     control-plane: controller-manager
 ---
@@ -790,37 +809,10 @@ spec:
     spec:
       containers:
       - args:
-        - --secure-listen-address=0.0.0.0:8443
-        - --upstream=http://127.0.0.1:8080/
-        - --logtostderr=true
-        - --v=0
-        image: gcr.io/kubebuilder/kube-rbac-proxy:v0.8.0
-        name: kube-rbac-proxy
-        ports:
-        - containerPort: 8443
-          name: https
-          protocol: TCP
-        resources:
-          limits:
-            cpu: 500m
-            memory: 128Mi
-          requests:
-            cpu: 5m
-            memory: 64Mi
-        securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
-          readOnlyRootFilesystem: true
-          runAsGroup: 65534
-          runAsNonRoot: false
-          runAsUser: 65534
-      - args:
         - --health-probe-bind-address=:8081
-        - --metrics-bind-address=127.0.0.1:8080
+        - --metrics-bind-address=:8080
         - --leader-elect
-        - --agent-image=agent:dev
+        - --agent-image=ghcr.io/nccloud/wireguard-operator/agent:v2.9.0
         command:
         - /manager
         env:
@@ -828,7 +820,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        image: manager:dev
+        image: ghcr.io/nccloud/wireguard-operator/manager:v2.9.0
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
