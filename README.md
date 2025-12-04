@@ -3,10 +3,9 @@
 
 Painless deployment of wireguard on kubernetes
 
-## Support and discussions
+## Support
 
-If you are facing any problems please open an [issue](https://github.com/nccloud/wireguard-operator/issues) or start a 
-[discussion](https://github.com/nccloud/wireguard-operator/discussions) 
+If you are facing any problems please open an [issue](https://github.com/nccloud/wireguard-operator/issues)
 
 ## Tested with
 - [x] IBM Cloud Kubernetes Service
