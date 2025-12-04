@@ -131,7 +131,7 @@ func main() {
 			return
 		}
 
-		httpLog.Info("agent is ready")
+		httpLog.V(2).Info("agent is ready")
 
 		w.WriteHeader(http.StatusOK)
 	})
