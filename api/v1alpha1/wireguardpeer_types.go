@@ -55,6 +55,8 @@ type WireguardPeerSpec struct {
 	//+kubebuilder:validation:Required
 	//+kubebuilder:validation:MinLength=1
 	WireguardRef string `json:"wireguardRef"`
+	// The key is used as the opposite of AllowedIPs. The wireguard server is using this flag to build its AllowedIPs configuration for the peer.
+	Routes []string `json:"routes,omitempty"`
 	// Egress network policies for the peer.
 	EgressNetworkPolicies EgressNetworkPolicies `json:"egressNetworkPolicies,omitempty"`
 	DownloadSpeed         Speed                 `json:"downloadSpeed,omitempty"`

@@ -1,0 +1,54 @@
+# Example: Peer-to-Peer Routing Through WireGuard Server
+#
+# This example demonstrates how to configure peers to route traffic
+# between each other's networks through the WireGuard server.
+#
+# Scenario:
+# - peer1 has a local network 10.10.30.0/24 that it wants to share
+# - peer2 wants to access peer1's network (10.10.30.0/24) through the VPN
+# - The WireGuard server (e.g., with CIDR 10.231.234.0/24) routes traffic between them
+
+---
+apiVersion: vpn.wireguard-operator.io/v1alpha1
+kind: WireguardPeer
+metadata:
+  name: peer1-with-local-network
+spec:
+  wireguardRef: "vpn"
+  # peer1 has a local network that it is responsible for routing
+  # This will be added to the peer's AllowedIPs on the server
+  # and routes will be created on the server OS to forward traffic
+  # to this network via peer1's WireGuard address.
+  allowedIPsForPeers:
+    - "10.10.30.0/24"
+  # Optional: peer1 might also want to reach other peer networks
+  # routesToPeers:
+  #   - "192.168.50.0/24"
+
+---
+apiVersion: vpn.wireguard-operator.io/v1alpha1
+kind: WireguardPeer
+metadata:
+  name: peer2-wants-access
+spec:
+  wireguardRef: "vpn"
+  # peer2 does not provide any networks but wants to reach peer1's network
+  # The routesToPeers field is informational - it indicates what this peer
+  # expects to be able to reach. The actual routing is handled by the server
+  # based on peer1's allowedIPsForPeers configuration.
+  routesToPeers:
+    - "10.10.30.0/24"
+
+---
+# How it works:
+# 1. peer1 specifies allowedIPsForPeers: ["10.10.30.0/24"]
+# 2. The WireGuard server adds 10.10.30.0/24 to peer1's AllowedIPs
+# 3. The agent creates a route: 10.10.30.0/24 via peer1's WireGuard IP
+# 4. When peer2 sends traffic to 10.10.30.1:
+#    a. Traffic arrives at the WireGuard server
+#    b. Server looks up the route and forwards to peer1
+#    c. peer1 routes the traffic to its local network
+#
+# Note: peer1 must have IP forwarding enabled and appropriate
+# routing/NAT configuration to route traffic to its local network.
+
