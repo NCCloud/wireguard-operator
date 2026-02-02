@@ -40,9 +40,10 @@ spec:
             description: WireguardSpec defines the desired state of Wireguard
             properties:
               address:
-                description: A string field that specifies the address for the Wireguard
-                  VPN server. This is the public IP address or hostname that peers
-                  will use to connect to the VPN.
+                description: |-
+                  A string field that specifies the address for the Wireguard Service.
+                  When ServiceType is LoadBalancer, this can be used to request a fixed Service IP.
+                  If ExternalAddress is not set, this value is also used as the peer endpoint.
                 type: string
               agent:
                 description: WireguardPodSpec defines spec for respective containers
@@ -117,6 +118,11 @@ spec:
                   be useful to enable if the peers are having problems with sending
                   traffic to the internet.
                 type: boolean
+              externalAddress:
+                description: |-
+                  A string field that specifies the external address where peers should connect to this Wireguard instance.
+                  When set, this is used for peer endpoints instead of Address or Service status.
+                type: string
               ipv6Only:
                 description: |-
                   IPv6Only indicates that only IPv6 connectivity should be configured for peers.

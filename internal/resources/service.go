@@ -65,7 +65,9 @@ func (b *ServiceBuilder) ForWireguard(wg *v1alpha1.Wireguard, serviceType corev1
 	}
 
 	if svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
-		svc.Spec.LoadBalancerIP = wg.Spec.Address
+		if wg.Spec.Address != "" {
+			svc.Spec.LoadBalancerIP = wg.Spec.Address
+		}
 	}
 
 	if err := SetOwnerReference(wg, svc, b.scheme); err != nil {

@@ -590,6 +590,179 @@ var _ = Describe("wireguard controller", func() {
 
 		})
 
+		It("uses address for the Service and externalAddress for peer endpoints", func() {
+			wgServer := &v1alpha1.Wireguard{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      wgKey.Name,
+					Namespace: wgKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardSpec{
+					ServiceType:     corev1.ServiceTypeLoadBalancer,
+					Address:         "10.0.0.10",
+					ExternalAddress: "203.0.113.10",
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), wgServer)).Should(Succeed())
+
+			serviceKey := types.NamespacedName{
+				Namespace: wgKey.Namespace,
+				Name:      wgKey.Name + "-svc",
+			}
+
+			Eventually(func() string {
+				svc := &corev1.Service{}
+				err := k8sClient.Get(context.Background(), serviceKey, svc)
+				if err != nil {
+					return ""
+				}
+				return svc.Spec.LoadBalancerIP
+			}, Timeout, Interval).Should(Equal("10.0.0.10"))
+
+			Expect(reconcileServiceWithTypeLoadBalancer(serviceKey, "lb.internal")).Should(Succeed())
+
+			wg := &v1alpha1.Wireguard{}
+			Eventually(func() string {
+				_ = k8sClient.Get(context.Background(), wgKey, wg)
+				return wg.Status.Address
+			}, Timeout, Interval).Should(Equal("203.0.113.10"))
+
+			peerKey := types.NamespacedName{
+				Name:      wgKey.Name + "-peer1",
+				Namespace: wgNamespace,
+			}
+
+			wgPeer := &v1alpha1.WireguardPeer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      peerKey.Name,
+					Namespace: peerKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardPeerSpec{
+					WireguardRef: wgName,
+				},
+			}
+
+			Expect(k8sClient.Create(context.Background(), wgPeer)).Should(Succeed())
+
+			Eventually(func() string {
+				secret := &corev1.Secret{}
+				err := k8sClient.Get(context.Background(), types.NamespacedName{Name: wgName + "-peer-configs", Namespace: wgNamespace}, secret)
+				if err != nil {
+					return ""
+				}
+				data := string(secret.Data[wgName+"-peer1"])
+				for _, line := range strings.Split(data, "\n") {
+					if strings.Contains(line, "Endpoint") {
+						return line
+					}
+				}
+				return "Endpoint = CONFIG_NOT_SET_ERROR"
+			}, Timeout, Interval).Should(Equal("Endpoint = 203.0.113.10:51820"))
+		})
+
+		It("uses externalAddress for peer endpoints when address is empty", func() {
+			wgServer := &v1alpha1.Wireguard{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      wgKey.Name,
+					Namespace: wgKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardSpec{
+					ServiceType:     corev1.ServiceTypeLoadBalancer,
+					ExternalAddress: "203.0.113.10",
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), wgServer)).Should(Succeed())
+
+			serviceKey := types.NamespacedName{
+				Namespace: wgKey.Namespace,
+				Name:      wgKey.Name + "-svc",
+			}
+
+			Eventually(func() string {
+				svc := &corev1.Service{}
+				err := k8sClient.Get(context.Background(), serviceKey, svc)
+				if err != nil {
+					return ""
+				}
+				return svc.Spec.LoadBalancerIP
+			}, Timeout, Interval).Should(Equal(""))
+
+			Eventually(func() error {
+				svc := &corev1.Service{}
+				return k8sClient.Get(context.Background(), serviceKey, svc)
+			}, Timeout, Interval).Should(Succeed())
+
+			Expect(reconcileServiceWithTypeLoadBalancer(serviceKey, "lb.internal")).Should(Succeed())
+
+			wg := &v1alpha1.Wireguard{}
+			Eventually(func() string {
+				_ = k8sClient.Get(context.Background(), wgKey, wg)
+				return wg.Status.Address
+			}, Timeout, Interval).Should(Equal("203.0.113.10"))
+
+			peerKey := types.NamespacedName{
+				Name:      wgKey.Name + "-peer1",
+				Namespace: wgNamespace,
+			}
+
+			wgPeer := &v1alpha1.WireguardPeer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      peerKey.Name,
+					Namespace: peerKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardPeerSpec{
+					WireguardRef: wgName,
+				},
+			}
+
+			Expect(k8sClient.Create(context.Background(), wgPeer)).Should(Succeed())
+
+			Eventually(func() string {
+				secret := &corev1.Secret{}
+				err := k8sClient.Get(context.Background(), types.NamespacedName{Name: wgName + "-peer-configs", Namespace: wgNamespace}, secret)
+				if err != nil {
+					return ""
+				}
+				data := string(secret.Data[wgName+"-peer1"])
+				for _, line := range strings.Split(data, "\n") {
+					if strings.Contains(line, "Endpoint") {
+						return line
+					}
+				}
+				return "Endpoint = CONFIG_NOT_SET_ERROR"
+			}, Timeout, Interval).Should(Equal("Endpoint = 203.0.113.10:51820"))
+		})
+
+		It("does not set loadBalancerIP when annotations are provided without address", func() {
+			wgServer := &v1alpha1.Wireguard{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      wgKey.Name,
+					Namespace: wgKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardSpec{
+					ServiceType:     corev1.ServiceTypeLoadBalancer,
+					ExternalAddress: "203.0.113.10",
+					ServiceAnnotations: map[string]string{
+						"lbipam.cilium.io/ips": "192.168.1.223",
+					},
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), wgServer)).Should(Succeed())
+
+			serviceKey := types.NamespacedName{
+				Namespace: wgKey.Namespace,
+				Name:      wgKey.Name + "-svc",
+			}
+
+			Eventually(func() []string {
+				svc := &corev1.Service{}
+				err := k8sClient.Get(context.Background(), serviceKey, svc)
+				if err != nil {
+					return []string{}
+				}
+				return []string{svc.Spec.LoadBalancerIP, svc.Annotations["lbipam.cilium.io/ips"]}
+			}, Timeout, Interval).Should(Equal([]string{"", "192.168.1.223"}))
+		})
+
 		It("sets DNS search domain override via Wireguard.Spec.DnsSearchDomain", func() {
 			wgServer := &v1alpha1.Wireguard{
 				ObjectMeta: metav1.ObjectMeta{

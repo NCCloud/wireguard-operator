@@ -32,8 +32,13 @@ const (
 type WireguardSpec struct {
 	// A string field that specifies the maximum transmission unit (MTU) size for Wireguard packets for all peers.
 	Mtu string `json:"mtu,omitempty"`
-	// A string field that specifies the address for the Wireguard VPN server. This is the public IP address or hostname that peers will use to connect to the VPN.
+	// A string field that specifies the address for the Wireguard Service.
+	// When ServiceType is LoadBalancer, this can be used to request a fixed Service IP.
+	// If ExternalAddress is not set, this value is also used as the peer endpoint.
 	Address string `json:"address,omitempty"`
+	// A string field that specifies the external address where peers should connect to this Wireguard instance.
+	// When set, this is used for peer endpoints instead of Address or Service status.
+	ExternalAddress string `json:"externalAddress,omitempty"`
 	// PeerCIDR is the IPv4 CIDR range from which Wireguard peer addresses will be allocated.
 	// If omitted (and IPv6Only is false), the operator will default to 10.8.0.0/24.
 	PeerCIDR string `json:"peerCIDR,omitempty"`
