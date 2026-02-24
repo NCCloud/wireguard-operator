@@ -34,9 +34,23 @@ spec:
           spec:
             description: WireguardSpec defines the desired state of Wireguard
             properties:
+              address:
+                description: Address for the Wireguard Service. When ServiceType is LoadBalancer, this can be used to request a fixed Service IP. If externalAddress is not set, this value is also used as the peer endpoint.
+                type: string
+              externalAddress:
+                description: External address where peers should connect. When set, this is used for peer endpoints instead of address or Service status.
+                type: string
               hostname:
                 type: string
               mtu:
+                type: string
+              serviceAnnotations:
+                additionalProperties:
+                  type: string
+                description: A map of key value strings for service annotations
+                type: object
+              serviceType:
+                description: Type of Kubernetes Service to expose Wireguard.
                 type: string
               peerCIDR:
                 description: IPv4 CIDR range from which Wireguard peer addresses will be allocated. If omitted and ipv6Only is false, defaults to 10.8.0.0/24.

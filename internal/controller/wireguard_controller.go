@@ -480,6 +480,9 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if wireguard.Spec.ServiceType != "" {
 		serviceType = wireguard.Spec.ServiceType
 	}
+	if serviceType == corev1.ServiceTypeLoadBalancer && len(wireguard.Spec.ServiceAnnotations) > 0 && wireguard.Spec.Address == "" {
+		log.Info("Service annotations set without address; the LB controller must assign an IP", "wireguard", wireguard.Name, "namespace", wireguard.Namespace)
+	}
 
 	dnsAddress := "1.1.1.1"
 	dnsSearchDomain := ""
@@ -529,7 +532,10 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Error(err, "Failed to get service")
 		return ctrl.Result{}, err
 	}
-	address := wireguard.Spec.Address
+	address := wireguard.Spec.ExternalAddress
+	if address == "" {
+		address = wireguard.Spec.Address
+	}
 	var port = fmt.Sprintf("%d", port)
 
 	if serviceType == corev1.ServiceTypeLoadBalancer {
@@ -571,7 +577,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		if address == "" {
 			if len(ips) == 0 {
-				err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "AwaitingNodeIPs", Message: "Unable to determine WG address though nodes addresses. Please set Wireguard.Spec.Address if necessary."})
+				err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "AwaitingNodeIPs", Message: "Unable to determine WG address through nodes addresses. Please set Wireguard.Spec.ExternalAddress or Wireguard.Spec.Address if necessary."})
 				if err != nil {
 					return ctrl.Result{}, err
 				}
@@ -920,7 +926,9 @@ func (r *WireguardReconciler) serviceForWireguard(m *v1alpha1.Wireguard, service
 	}
 
 	if dep.Spec.Type == corev1.ServiceTypeLoadBalancer {
-		dep.Spec.LoadBalancerIP = m.Spec.Address
+		if m.Spec.Address != "" {
+			dep.Spec.LoadBalancerIP = m.Spec.Address
+		}
 	}
 
 	ctrl.SetControllerReference(m, dep, r.Scheme)
