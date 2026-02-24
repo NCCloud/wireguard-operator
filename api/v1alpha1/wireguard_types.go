@@ -65,8 +65,10 @@ type WireguardSpec struct {
 	UseWgUserspaceImplementation bool `json:"useWgUserspaceImplementation,omitempty"`
 
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
-	Agent        WireguardPodSpec  `json:"agent,omitempty"`
-	Metric       WireguardPodSpec  `json:"metric,omitempty"`
+	// A list of Kubernetes taint tolerations applied to the Wireguard pod.
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+	Agent       WireguardPodSpec    `json:"agent,omitempty"`
+	Metric      WireguardPodSpec    `json:"metric,omitempty"`
 }
 
 // WireguardPodSpec defines spec for respective containers created for Wireguard
