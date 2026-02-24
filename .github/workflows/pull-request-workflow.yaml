@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "~1.25"
+          go-version-file: "go.mod"
 
       - name: Run tests
         run: make test
@@ -35,13 +35,15 @@ jobs:
           submodules: true
 
       - name: Build images
+        env:
+          MANAGER_IMAGE: wireguard-operator/manager:test
+          AGENT_IMAGE: wireguard-operator/agent:test
         run: |
-          docker build -t wireguard-operator/manager:test -f images/manager/Dockerfile .
-          docker build -t wireguard-operator/agent:test -f images/agent/Dockerfile .
+          make docker-build-integration-test
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "~1.25"
+          go-version-file: "go.mod"
 
       - uses: azure/setup-kubectl@v4
 
