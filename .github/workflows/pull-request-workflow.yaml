@@ -1,6 +1,14 @@
 name: PR pipeline
 on:
-  pull_request: {}
+  pull_request:
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "images/**"
+      - "config/**"
+      - ".github/workflows/pull-request-workflow.yaml"
 
 permissions:
   contents: read
