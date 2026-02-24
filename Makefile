@@ -168,8 +168,7 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 	$(KUSTOMIZE) build config/crd | kubectl delete -f -
 
 update-agent-image: kustomize
-	## TODO: Simplify later
-	AGENT_IMAGE=$(AGENT_IMAGE) envsubst < ./config/default/manager_args_patch.yaml.template > ./config/default/manager_args_patch.yaml
+	sed 's|$${AGENT_IMAGE}|$(AGENT_IMAGE)|g' ./config/default/manager_args_patch.yaml.template > ./config/default/manager_args_patch.yaml
 
 update-manager-image: kustomize
 	$(info MANAGER_IMAGE: "$(MANAGER_IMAGE)")
