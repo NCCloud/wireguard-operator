@@ -51,7 +51,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         repository: ${{ inputs.repository }}
         ref: ${{ inputs.ref }}
@@ -82,7 +82,7 @@ jobs:
           type=raw,value=${{ inputs.tag }}
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.image }}
 
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v6
       with:
         go-version: '^1.25'
 
@@ -111,7 +111,7 @@ jobs:
 
     - name: Upload artifact
       if: ${{ inputs.upload_images == true }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
-        name: images
+        name: image-${{ matrix.image }}
         path: /tmp/${{matrix.image}}.tar

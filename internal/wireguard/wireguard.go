@@ -230,7 +230,7 @@ type Wireguard struct {
 }
 
 func (wg *Wireguard) Sync(state agent.State) error {
-	wg.Logger.Info("syncing Wireguard")
+	wg.Logger.V(2).Info("syncing Wireguard")
 	// create wg0 link
 	err := SyncLink(state, wg.Iface, wg.WgUserspaceImplementationFallback, wg.WgUseUserspaceImpl)
 	if err != nil {
