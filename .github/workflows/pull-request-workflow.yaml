@@ -33,7 +33,7 @@ jobs:
         with:
           name: Unit tests
           path: test-results.json
-          reporter: golang-unit
+          reporter: golang-json
 
   e2e:
     runs-on: ubuntu-latest
