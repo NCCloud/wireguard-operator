@@ -32,7 +32,7 @@ jobs:
         if: always()
         with:
           name: Unit tests
-          path: test-results.json
+          path: test-report.json
           reporter: golang-json
 
   e2e:
