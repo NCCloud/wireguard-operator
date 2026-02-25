@@ -1202,6 +1202,88 @@ var _ = Describe("wireguard controller", func() {
 			}, Timeout, Interval).Should(Equal("Address = fd00:1::2"))
 		})
 
+		It("reconciles deployment tolerations when spec changes", func() {
+			expectedTolerations := []corev1.Toleration{
+				{
+					Key:      "node-role.kubernetes.io/control-plane",
+					Operator: corev1.TolerationOpExists,
+					Effect:   corev1.TaintEffectNoSchedule,
+				},
+			}
+
+			wgServer := &v1alpha1.Wireguard{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      wgKey.Name,
+					Namespace: wgKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardSpec{
+					ServiceType: corev1.ServiceTypeClusterIP,
+					Address:     "test-address",
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), wgServer)).Should(Succeed())
+
+			serviceKey := types.NamespacedName{
+				Namespace: wgKey.Namespace,
+				Name:      wgKey.Name + "-svc",
+			}
+			Eventually(func() error {
+				svc := &corev1.Service{}
+				return k8sClient.Get(context.Background(), serviceKey, svc)
+			}, Timeout, Interval).Should(Succeed())
+			Expect(reconcileServiceWithClusterIP(serviceKey, 51820)).Should(Succeed())
+
+			depKey := types.NamespacedName{
+				Namespace: wgKey.Namespace,
+				Name:      wgKey.Name + "-dep",
+			}
+
+			Eventually(func() []corev1.Toleration {
+				dep := &appsv1.Deployment{}
+				err := k8sClient.Get(context.Background(), depKey, dep)
+				if err != nil {
+					return nil
+				}
+				return dep.Spec.Template.Spec.Tolerations
+			}, Timeout, Interval).Should(BeEmpty())
+
+			Eventually(func() error {
+				wg := &v1alpha1.Wireguard{}
+				if err := k8sClient.Get(context.Background(), wgKey, wg); err != nil {
+					return err
+				}
+				wg.Spec.Tolerations = expectedTolerations
+				return k8sClient.Update(context.Background(), wg)
+			}, Timeout, Interval).Should(Succeed())
+
+			Eventually(func() []corev1.Toleration {
+				dep := &appsv1.Deployment{}
+				err := k8sClient.Get(context.Background(), depKey, dep)
+				if err != nil {
+					return nil
+				}
+				return dep.Spec.Template.Spec.Tolerations
+			}, Timeout, Interval).Should(Equal(expectedTolerations))
+
+			Eventually(func() error {
+				wg := &v1alpha1.Wireguard{}
+				if err := k8sClient.Get(context.Background(), wgKey, wg); err != nil {
+					return err
+				}
+				wg.Spec.Tolerations = nil
+				return k8sClient.Update(context.Background(), wg)
+			}, Timeout, Interval).Should(Succeed())
+
+			Eventually(func() []corev1.Toleration {
+				dep := &appsv1.Deployment{}
+				err := k8sClient.Get(context.Background(), depKey, dep)
+				if err != nil {
+					return nil
+				}
+				return dep.Spec.Template.Spec.Tolerations
+			}, Timeout, Interval).Should(BeEmpty())
+		})
+
 		for _, useWgUserspace := range []bool{true, false} {
 			testTextPrefix := "uses"
 			if !useWgUserspace {
@@ -1216,10 +1298,22 @@ var _ = Describe("wireguard controller", func() {
 						Namespace: wgKey.Namespace,
 					},
 					Spec: v1alpha1.WireguardSpec{
+						ServiceType:                  corev1.ServiceTypeClusterIP,
+						Address:                      "test-address",
 						UseWgUserspaceImplementation: useWgUserspace,
 					},
 				}
 				Expect(k8sClient.Create(context.Background(), wgServer)).Should(Succeed())
+
+				serviceKey := types.NamespacedName{
+					Namespace: wgKey.Namespace,
+					Name:      wgKey.Name + "-svc",
+				}
+				Eventually(func() error {
+					svc := &corev1.Service{}
+					return k8sClient.Get(context.Background(), serviceKey, svc)
+				}, Timeout, Interval).Should(Succeed())
+				Expect(reconcileServiceWithClusterIP(serviceKey, 51820)).Should(Succeed())
 
 				// new
 				depName := wgKey.Name + "-dep"
@@ -1246,7 +1340,6 @@ var _ = Describe("wireguard controller", func() {
 					if err != nil {
 						return []string{}
 					}
-					fmt.Println(dep)
 					for _, c := range dep.Spec.Template.Spec.Containers {
 						if c.Name == "agent" {
 							return c.Command

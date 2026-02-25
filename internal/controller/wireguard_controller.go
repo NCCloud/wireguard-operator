@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -784,6 +785,17 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// Ensure scheduling settings remain in sync with spec updates.
+	if !reflect.DeepEqual(deploymentFound.Spec.Template.Spec.NodeSelector, wireguard.Spec.NodeSelector) ||
+		!reflect.DeepEqual(deploymentFound.Spec.Template.Spec.Tolerations, wireguard.Spec.Tolerations) {
+		log.Info("Updating deployment scheduling settings")
+		dep := r.deploymentForWireguard(wireguard)
+		if err := r.Update(ctx, dep); err != nil {
+			log.Error(err, "unable to update deployment scheduling settings", "dep.Namespace", dep.Namespace, "dep.Name", dep.Name)
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Update resource-level status and unique identifier if available
 	{
 		resourcesStatus := make([]v1alpha1.Resource, 0, 4)
@@ -1003,6 +1015,7 @@ func (r *WireguardReconciler) deploymentForWireguard(m *v1alpha1.Wireguard) *app
 				},
 				Spec: corev1.PodSpec{
 					NodeSelector: m.Spec.NodeSelector,
+					Tolerations:  m.Spec.Tolerations,
 					SecurityContext: &corev1.PodSecurityContext{
 						SeccompProfile: &corev1.SeccompProfile{
 							Type: corev1.SeccompProfileType("RuntimeDefault"),

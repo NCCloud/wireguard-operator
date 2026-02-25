@@ -75,6 +75,7 @@ func (b *DeploymentBuilder) ForWireguard(wg *v1alpha1.Wireguard) (*appsv1.Deploy
 				},
 				Spec: corev1.PodSpec{
 					NodeSelector: wg.Spec.NodeSelector,
+					Tolerations:  wg.Spec.Tolerations,
 					SecurityContext: &corev1.PodSecurityContext{
 						SeccompProfile: &corev1.SeccompProfile{
 							Type: corev1.SeccompProfileType("RuntimeDefault"),

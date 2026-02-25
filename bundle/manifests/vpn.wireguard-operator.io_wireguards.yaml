@@ -61,6 +61,22 @@ spec:
               ipv6Only:
                 description: When true and peerCIDRv6 is set, only IPv6 connectivity will be configured for peers (no new IPv4 addresses, routes, or NAT).
                 type: boolean
+              tolerations:
+                items:
+                  properties:
+                    effect:
+                      type: string
+                    key:
+                      type: string
+                    operator:
+                      type: string
+                    tolerationSeconds:
+                      format: int64
+                      type: integer
+                    value:
+                      type: string
+                  type: object
+                type: array
             type: object
           status:
             description: WireguardStatus defines the observed state of Wireguard
