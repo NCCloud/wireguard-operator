@@ -293,9 +293,10 @@ spec:
             description: WireguardSpec defines the desired state of Wireguard
             properties:
               address:
-                description: A string field that specifies the address for the Wireguard
-                  VPN server. This is the public IP address or hostname that peers
-                  will use to connect to the VPN.
+                description: |-
+                  A string field that specifies the address for the Wireguard Service.
+                  When ServiceType is LoadBalancer, this can be used to request a fixed Service IP.
+                  If ExternalAddress is not set, this value is also used as the peer endpoint.
                 type: string
               agent:
                 description: WireguardPodSpec defines spec for respective containers
@@ -370,6 +371,11 @@ spec:
                   be useful to enable if the peers are having problems with sending
                   traffic to the internet.
                 type: boolean
+              externalAddress:
+                description: |-
+                  A string field that specifies the external address where peers should connect to this Wireguard instance.
+                  When set, this is used for peer endpoints instead of Address or Service status.
+                type: string
               ipv6Only:
                 description: |-
                   IPv6Only indicates that only IPv6 connectivity should be configured for peers.
@@ -468,6 +474,44 @@ spec:
                   that should be used for the Wireguard VPN. This could be ClusterIP,
                   NodePort or LoadBalancer, depending on the needs of the deployment.
                 type: string
+              tolerations:
+                items:
+                  description: |-
+                    The pod this Toleration is attached to tolerates any taint that matches
+                    the triple <key,value,effect> using the matching operator <operator>.
+                  properties:
+                    effect:
+                      description: |-
+                        Effect indicates the taint effect to match. Empty means match all taint effects.
+                        When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                      type: string
+                    key:
+                      description: |-
+                        Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                        If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                      type: string
+                    operator:
+                      description: |-
+                        Operator represents a key's relationship to the value.
+                        Valid operators are Exists and Equal. Defaults to Equal.
+                        Exists is equivalent to wildcard for value, so that a pod can
+                        tolerate all taints of a particular category.
+                      type: string
+                    tolerationSeconds:
+                      description: |-
+                        TolerationSeconds represents the period of time the toleration (which must be
+                        of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                        it is not set, which means tolerate the taint forever (do not evict). Zero and
+                        negative values will be treated as 0 (evict immediately) by the system.
+                      format: int64
+                      type: integer
+                    value:
+                      description: |-
+                        Value is the taint value the toleration matches to.
+                        If the operator is Exists, the value should be empty, otherwise just a regular string.
+                      type: string
+                  type: object
+                type: array
               useWgUserspaceImplementation:
                 description: A boolean field that specifies whether to use the userspace
                   implementation of Wireguard instead of the kernel one.
@@ -812,7 +856,7 @@ spec:
         - --health-probe-bind-address=:8081
         - --metrics-bind-address=:8080
         - --leader-elect
-        - --agent-image=ghcr.io/nccloud/wireguard-operator/agent:v2.9.0
+        - --agent-image=ghcr.io/nccloud/wireguard-operator/agent:v2.10.0
         command:
         - /manager
         env:
@@ -820,7 +864,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        image: ghcr.io/nccloud/wireguard-operator/manager:v2.9.0
+        image: ghcr.io/nccloud/wireguard-operator/manager:v2.10.0
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:

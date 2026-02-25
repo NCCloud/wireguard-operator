@@ -1,4 +1,13 @@
-# [2.9.0](https://github.com/jodevsa/wireguard-operator/compare/v2.7.0...v2.8.0) (2025-11-26)
+# [2.10.0](https://github.com/jodevsa/wireguard-operator/compare/v2.9.0...v2.10.0) (2026-02-25)
+
+### Features
+* Added support for `spec.externalAddress` in the Wireguard API for specifying external address of Wireguard server where peers can connect to.
+* Added support for `spec.tolerations` in the Wireguard API which propagate to Deployment spec
+
+### Changes
+* Increased log level for sync messages
+
+# [2.9.0](https://github.com/jodevsa/wireguard-operator/compare/v2.8.0...v2.9.0) (2025-11-26)
 
 This release adds some long requested features like ability to specify a custom CIDR range for Wireguard tunnel and adds support for using IPv6 with Wireguard.
 
