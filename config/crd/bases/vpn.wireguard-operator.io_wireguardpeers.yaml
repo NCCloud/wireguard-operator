@@ -143,6 +143,19 @@ spec:
                 description: The key used by the peer to authenticate with the wg
                   server.
                 type: string
+              routes:
+                description: The key is used as the opposite of AllowedIPs. The wireguard
+                  server is using this flag to build its AllowedIPs configuration
+                  for the peer.
+                items:
+                  type: string
+                type: array
+              routesV6:
+                description: RoutesV6 specifies IPv6 CIDR ranges that this peer is
+                  responsible for routing. Similar to Routes but for IPv6.
+                items:
+                  type: string
+                type: array
               uploadSpeed:
                 properties:
                   config:

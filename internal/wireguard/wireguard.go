@@ -57,6 +57,101 @@ func syncRoute(iface string, cidr string, gw net.IP, family int) error {
 	return nil
 }
 
+// syncPeerRoutes creates OS-level routes for networks that peers advertise via AllowedIPsForPeers.
+// This allows traffic to flow between peers through the WireGuard server.
+func syncPeerRoutes(iface string, state agent.State, logger logr.Logger) error {
+	logger.Info("Syncing peer routes")
+
+	link, err := netlink.LinkByName(iface)
+	if err != nil {
+		return fmt.Errorf("failed to get link %s: %w", iface, err)
+	}
+
+	// Get the server's CIDR to exclude from stale route removal
+	serverCIDR := state.Server.Spec.PeerCIDR
+	if serverCIDR == "" {
+		serverCIDR = ipam.DefaultPeerCIDR4
+	}
+	_, serverNet, _ := net.ParseCIDR(serverCIDR)
+
+	desiredRoutes := make(map[string]bool)
+	for _, peer := range state.Peers {
+		if peer.Spec.Disabled || peer.Spec.PublicKey == "" {
+			continue
+		}
+
+		for _, cidr := range peer.Spec.Routes {
+			desiredRoutes[cidr] = true
+		}
+		for _, cidr := range peer.Spec.RoutesV6 {
+			desiredRoutes[cidr] = true
+		}
+	}
+
+	logger.Info("Desired routes from state:")
+	for cidr := range desiredRoutes {
+		logger.Info("Route", "route", fmt.Sprintf("%s => %s", cidr, iface))
+	}
+
+	// Get existing routes on the WireGuard interface
+	existingRoutes, err := netlink.RouteList(link, netlink.FAMILY_ALL)
+	if err != nil {
+		return fmt.Errorf("failed to list routes: %w", err)
+	}
+
+	existingPeerRoutes := make(map[string]netlink.Route)
+	for _, route := range existingRoutes {
+		if route.LinkIndex != link.Attrs().Index || route.Dst == nil {
+			continue
+		}
+		// Skip the server's own network, this is managed somewhere else
+		if serverNet != nil && serverNet.String() == route.Dst.String() {
+			continue
+		}
+		existingPeerRoutes[route.Dst.String()] = route
+	}
+
+	// Add desired routes
+	for cidr := range desiredRoutes {
+		_, dst, err := net.ParseCIDR(cidr)
+		if err != nil {
+			logger.Error(err, "Failed to parse CIDR", "cidr", cidr)
+			continue
+		}
+
+		// Check if the route already exists
+		if _, ok := existingPeerRoutes[dst.String()]; ok {
+			// Route already exists on the interface, keep it
+			delete(existingPeerRoutes, dst.String())
+			continue
+		}
+
+		route := netlink.Route{
+			LinkIndex: link.Attrs().Index,
+			Dst:       dst,
+		}
+
+		err = netlink.RouteAdd(&route)
+		if err != nil {
+			logger.Error(err, "Failed to add route", "dst", cidr)
+			continue
+		}
+
+		logger.Info("Added peer route", "route", fmt.Sprintf("%s => %s", cidr, iface))
+	}
+
+	// Remove stale routes (routes that exist on the interface but are no longer desired)
+	for dstStr, route := range existingPeerRoutes {
+		if err := netlink.RouteDel(&route); err != nil {
+			logger.Error(err, "Failed to remove stale route", "dst", dstStr)
+			continue
+		}
+		logger.Info("Removed stale peer route", "route", fmt.Sprintf("%s => %s", dstStr, iface))
+	}
+
+	return nil
+}
+
 func syncAddress(iface string, ipWithMask *net.IPNet, family int) error {
 	link, err := netlink.LinkByName(iface)
 	if err != nil {
@@ -296,6 +391,11 @@ func (wg *Wireguard) Sync(state agent.State) error {
 		return err
 	}
 
+	// sync routes for peer-advertised networks (AllowedIPsForPeers)
+	if err := syncPeerRoutes(wg.Iface, state, wg.Logger); err != nil {
+		wg.Logger.Error(err, "Failed to sync peer routes")
+	}
+
 	return nil
 }
 
@@ -385,6 +485,13 @@ func createPeersConfiguration(state agent.State, iface string) ([]wgtypes.PeerCo
 				if peerState.Spec.AddressV6 != "" {
 					desiredAllowed = append(desiredAllowed, getIP(peerState.Spec.AddressV6+"/128")...)
 				}
+				// Add networks the peer is responsible for routing
+				for _, cidr := range peerState.Spec.Routes {
+					desiredAllowed = append(desiredAllowed, getIP(cidr)...)
+				}
+				for _, cidr := range peerState.Spec.RoutesV6 {
+					desiredAllowed = append(desiredAllowed, getIP(cidr)...)
+				}
 
 				// Only update if AllowedIPs differ.
 				same := len(desiredAllowed) == len(peer.AllowedIPs)
@@ -438,6 +545,13 @@ func createPeersConfiguration(state agent.State, iface string) ([]wgtypes.PeerCo
 		}
 		if peer.Spec.AddressV6 != "" {
 			allowed = append(allowed, getIP(peer.Spec.AddressV6+"/128")...)
+		}
+		// Add networks the peer is responsible for routing
+		for _, cidr := range peer.Spec.Routes {
+			allowed = append(allowed, getIP(cidr)...)
+		}
+		for _, cidr := range peer.Spec.RoutesV6 {
+			allowed = append(allowed, getIP(cidr)...)
 		}
 		p := wgtypes.PeerConfig{
 			AllowedIPs: allowed,
