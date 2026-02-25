@@ -17,6 +17,7 @@ limitations under the License.
 package controllers
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -56,6 +57,11 @@ var _ = BeforeSuite(func() {
 		CRDDirectoryPaths:       []string{filepath.Join("..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing:   true,
 		ControlPlaneStopTimeout: time.Second * 120,
+	}
+
+	if os.Getenv("ENVTEST_DEBUG_OUTPUT") != "" {
+		testEnv.ControlPlane.GetAPIServer().Out = GinkgoWriter
+		testEnv.ControlPlane.GetAPIServer().Err = GinkgoWriter
 	}
 
 	cfg, err := testEnv.Start()

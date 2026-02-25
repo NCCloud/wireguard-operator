@@ -1,59 +1,62 @@
 name: PR pipeline
 on:
-  pull_request: {}
+  pull_request:
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "images/**"
+      - "config/**"
+      - ".github/workflows/pull-request-workflow.yaml"
 
 permissions:
   contents: read
-  packages: write
+  checks: write
 
-jobs: 
-  build-images:
-    uses: ./.github/workflows/build-images.yaml
-    with:
-      push: false
-      upload_images: true
-      platforms: "linux/amd64"
-      ref: ${{ github.ref }}
-      tag: dev
-
-  e2e:
+jobs:
+  test:
     runs-on: ubuntu-latest
-    needs: build-images
     steps:
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v6
-        with:
-          pattern: image-*
-          path: /tmp
-          merge-multiple: true
-
-      - name: Load image
-        run: |
-          docker load --input /tmp/agent.tar
-          docker load --input /tmp/manager.tar
-          docker image ls -a
-
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ inputs.repository }}
-          ref: ${{ inputs.ref }}
-          submodules: true
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '^1.25'
+          go-version-file: "go.mod"
+
+      - name: Run tests
+        run: make test-ci
+
+      - name: Test report
+        uses: dorny/test-reporter@v2
+        if: always()
+        with:
+          name: Unit tests
+          path: test-report.json
+          reporter: golang-json
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Build images
+        env:
+          MANAGER_IMAGE: wireguard-operator/manager:test
+          AGENT_IMAGE: wireguard-operator/agent:test
+        run: |
+          make docker-build-integration-test
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
 
       - uses: azure/setup-kubectl@v4
 
-      - name: run e2e
-        env:
-          REGISTRY: ghcr.io
-          AGENT_IMAGE: ghcr.io/${{ github.repository }}/agent:dev
-          MANAGER_IMAGE: ghcr.io/${{ github.repository }}/manager:dev
+      - name: Run e2e tests
         run: |
           make kind
-          make run-e2e AGENT_IMAGE="$AGENT_IMAGE" MANAGER_IMAGE="$MANAGER_IMAGE"
+          make run-e2e AGENT_IMAGE=wireguard-operator/agent:test MANAGER_IMAGE=wireguard-operator/manager:test
