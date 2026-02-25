@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 jobs:
   test:
@@ -24,7 +25,15 @@ jobs:
           go-version-file: "go.mod"
 
       - name: Run tests
-        run: make test
+        run: make test-ci
+
+      - name: Test report
+        uses: dorny/test-reporter@v2
+        if: always()
+        with:
+          name: Unit tests
+          path: test-results.json
+          reporter: golang-unit
 
   e2e:
     runs-on: ubuntu-latest
