@@ -222,6 +222,8 @@ spec:
                   NodePort or LoadBalancer, depending on the needs of the deployment.
                 type: string
               tolerations:
+                description: A list of Kubernetes taint tolerations applied to the
+                  Wireguard pod.
                 items:
                   description: |-
                     The pod this Toleration is attached to tolerates any taint that matches

@@ -177,6 +177,16 @@ func (r *WireguardPeerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
+	if msg, err := r.checkDuplicateAddress(ctx, req.Namespace, newPeer); err != nil {
+		return ctrl.Result{}, err
+	} else if msg != "" {
+		log.Error(fmt.Errorf("duplicate peer address"), msg)
+		if err := r.updateStatus(ctx, newPeer, v1alpha1.Error, msg); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
 	wireguardSecret := &corev1.Secret{}
 	err = r.Get(ctx, types.NamespacedName{Name: newPeer.Spec.WireguardRef, Namespace: newPeer.Namespace}, wireguardSecret)
 
@@ -197,6 +207,32 @@ func (r *WireguardPeerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// No longer wait for a config in status; peer configs are stored in a Secret
 
 	return ctrl.Result{}, nil
+}
+
+// checkDuplicateAddress checks whether the peer's address or addressV6 is already
+// used by another peer on the same wireguardRef. Returns a non-empty message
+// describing the conflict, or "" if no duplicate is found.
+func (r *WireguardPeerReconciler) checkDuplicateAddress(ctx context.Context, namespace string, peer *v1alpha1.WireguardPeer) (string, error) {
+	if peer.Spec.Address == "" && peer.Spec.AddressV6 == "" {
+		return "", nil
+	}
+
+	allPeers := &v1alpha1.WireguardPeerList{}
+	if err := r.List(ctx, allPeers, client.InNamespace(namespace)); err != nil {
+		return "", err
+	}
+	for _, other := range allPeers.Items {
+		if other.Name == peer.Name || other.Spec.WireguardRef != peer.Spec.WireguardRef {
+			continue
+		}
+		if peer.Spec.Address != "" && other.Spec.Address == peer.Spec.Address {
+			return fmt.Sprintf("Duplicate address %s: already used by peer %s", peer.Spec.Address, other.Name), nil
+		}
+		if peer.Spec.AddressV6 != "" && other.Spec.AddressV6 == peer.Spec.AddressV6 {
+			return fmt.Sprintf("Duplicate IPv6 address %s: already used by peer %s", peer.Spec.AddressV6, other.Name), nil
+		}
+	}
+	return "", nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

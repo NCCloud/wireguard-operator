@@ -20,6 +20,7 @@ package ipam
 import (
 	"fmt"
 	"net/netip"
+	"slices"
 
 	"github.com/korylprince/ipnetgen"
 	"github.com/nccloud/wireguard-operator/api/v1alpha1"
@@ -108,10 +109,5 @@ func deriveReservedIPs(cidr string) []string {
 
 // isUsed checks if an IP address is in the list of used IPs.
 func (a *Allocator) isUsed(ip string, usedIPs []string) bool {
-	for _, usedIP := range usedIPs {
-		if ip == usedIP {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(usedIPs, ip)
 }

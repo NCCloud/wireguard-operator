@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -202,7 +203,6 @@ func effectivePeerCIDR6(wg *v1alpha1.Wireguard) (string, bool) {
 }
 
 func (r *WireguardReconciler) updateWireguardPeers(ctx context.Context, req ctrl.Request, wireguard *v1alpha1.Wireguard, serverAddress string, dns string, dnsSearchDomain string, serverPublicKey string, serverMtu string) error {
-
 	peers, err := r.getWireguardPeers(ctx, req)
 	if err != nil {
 		return err
@@ -767,11 +767,8 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	existingUserspace := false
 	for _, c := range deploymentFound.Spec.Template.Spec.Containers {
 		if c.Name == "agent" {
-			for _, arg := range c.Command {
-				if arg == "--wg-use-userspace-implementation" {
-					existingUserspace = true
-					break
-				}
+			if slices.Contains(c.Command, "--wg-use-userspace-implementation") {
+				existingUserspace = true
 			}
 			break
 		}
