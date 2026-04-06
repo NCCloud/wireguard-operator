@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -202,6 +203,7 @@ func effectivePeerCIDR6(wg *v1alpha1.Wireguard) (string, bool) {
 }
 
 func (r *WireguardReconciler) updateWireguardPeers(ctx context.Context, req ctrl.Request, wireguard *v1alpha1.Wireguard, serverAddress string, dns string, dnsSearchDomain string, serverPublicKey string, serverMtu string) error {
+	log := ctrllog.FromContext(ctx)
 
 	peers, err := r.getWireguardPeers(ctx, req)
 	if err != nil {
@@ -251,7 +253,43 @@ func (r *WireguardReconciler) updateWireguardPeers(ctx context.Context, req ctrl
 	// Always rebuild data from scratch to prune removed peers
 	newPeerCfgData := map[string][]byte{}
 
-	for _, peer := range peers.Items {
+	// Track addresses to detect duplicates among peers.
+	seenAddr4 := map[string]string{} // address -> peer name
+	seenAddr6 := map[string]string{} // addressV6 -> peer name
+
+	for i := range peers.Items {
+		peer := peers.Items[i]
+
+		// Check for duplicate IPv4 address.
+		if peer.Spec.Address != "" {
+			if existingPeer, ok := seenAddr4[peer.Spec.Address]; ok {
+				msg := fmt.Sprintf("Duplicate address %s: already used by peer %s", peer.Spec.Address, existingPeer)
+				log.Error(fmt.Errorf("duplicate peer address"), msg, "peer", peer.Name)
+				peer.Status.Status = v1alpha1.Error
+				peer.Status.Message = msg
+				if err := r.Status().Update(ctx, &peer); err != nil && !errors.IsConflict(err) {
+					return err
+				}
+				continue
+			}
+			seenAddr4[peer.Spec.Address] = peer.Name
+		}
+
+		// Check for duplicate IPv6 address.
+		if peer.Spec.AddressV6 != "" {
+			if existingPeer, ok := seenAddr6[peer.Spec.AddressV6]; ok {
+				msg := fmt.Sprintf("Duplicate IPv6 address %s: already used by peer %s", peer.Spec.AddressV6, existingPeer)
+				log.Error(fmt.Errorf("duplicate peer address"), msg, "peer", peer.Name)
+				peer.Status.Status = v1alpha1.Error
+				peer.Status.Message = msg
+				if err := r.Status().Update(ctx, &peer); err != nil && !errors.IsConflict(err) {
+					return err
+				}
+				continue
+			}
+			seenAddr6[peer.Spec.AddressV6] = peer.Name
+		}
+
 		// Allocate IPv4 address if enabled and not in IPv6-only mode.
 		if cidr4 != "" && !wireguard.Spec.IPv6Only && peer.Spec.Address == "" {
 			ip, err := getAvaialbleIp(cidr4, usedIps4)
@@ -263,6 +301,7 @@ func (r *WireguardReconciler) updateWireguardPeers(ctx context.Context, req ctrl
 				return err
 			}
 			usedIps4 = append(usedIps4, ip)
+			seenAddr4[ip] = peer.Name
 		}
 
 		// Allocate IPv6 address if enabled.
@@ -276,6 +315,7 @@ func (r *WireguardReconciler) updateWireguardPeers(ctx context.Context, req ctrl
 				return err
 			}
 			usedIps6 = append(usedIps6, ip6)
+			seenAddr6[ip6] = peer.Name
 		}
 		dnsConfiguration := dns
 
@@ -767,11 +807,8 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	existingUserspace := false
 	for _, c := range deploymentFound.Spec.Template.Spec.Containers {
 		if c.Name == "agent" {
-			for _, arg := range c.Command {
-				if arg == "--wg-use-userspace-implementation" {
-					existingUserspace = true
-					break
-				}
+			if slices.Contains(c.Command, "--wg-use-userspace-implementation") {
+				existingUserspace = true
 			}
 			break
 		}

@@ -177,6 +177,35 @@ func (r *WireguardPeerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
+	// Check for duplicate addresses among peers referencing the same Wireguard server.
+	if newPeer.Spec.Address != "" || newPeer.Spec.AddressV6 != "" {
+		allPeers := &v1alpha1.WireguardPeerList{}
+		if err := r.List(ctx, allPeers, client.InNamespace(req.Namespace)); err != nil {
+			return ctrl.Result{}, err
+		}
+		for _, other := range allPeers.Items {
+			if other.Name == newPeer.Name || other.Spec.WireguardRef != newPeer.Spec.WireguardRef {
+				continue
+			}
+			if newPeer.Spec.Address != "" && other.Spec.Address == newPeer.Spec.Address {
+				msg := fmt.Sprintf("Duplicate address %s: already used by peer %s", newPeer.Spec.Address, other.Name)
+				log.Error(fmt.Errorf("duplicate peer address"), msg)
+				if err := r.updateStatus(ctx, newPeer, v1alpha1.Error, msg); err != nil {
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{}, nil
+			}
+			if newPeer.Spec.AddressV6 != "" && other.Spec.AddressV6 == newPeer.Spec.AddressV6 {
+				msg := fmt.Sprintf("Duplicate IPv6 address %s: already used by peer %s", newPeer.Spec.AddressV6, other.Name)
+				log.Error(fmt.Errorf("duplicate peer address"), msg)
+				if err := r.updateStatus(ctx, newPeer, v1alpha1.Error, msg); err != nil {
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{}, nil
+			}
+		}
+	}
+
 	wireguardSecret := &corev1.Secret{}
 	err = r.Get(ctx, types.NamespacedName{Name: newPeer.Spec.WireguardRef, Namespace: newPeer.Namespace}, wireguardSecret)
 

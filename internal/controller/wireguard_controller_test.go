@@ -213,7 +213,7 @@ var _ = Describe("wireguard controller", func() {
 					return ""
 				}
 				data := string(secret.Data[wgName+"-peer1"])
-				for _, line := range strings.Split(data, "\n") {
+				for line := range strings.SplitSeq(data, "\n") {
 					if strings.Contains(line, "Endpoint") {
 						return line
 					}
@@ -279,7 +279,7 @@ var _ = Describe("wireguard controller", func() {
 					return ""
 				}
 				data := string(secret.Data[wgName+"-peer1"])
-				for _, line := range strings.Split(data, "\n") {
+				for line := range strings.SplitSeq(data, "\n") {
 					if strings.Contains(line, "DNS") {
 						return line
 					}
@@ -650,7 +650,7 @@ var _ = Describe("wireguard controller", func() {
 					return ""
 				}
 				data := string(secret.Data[wgName+"-peer1"])
-				for _, line := range strings.Split(data, "\n") {
+				for line := range strings.SplitSeq(data, "\n") {
 					if strings.Contains(line, "Endpoint") {
 						return line
 					}
@@ -723,7 +723,7 @@ var _ = Describe("wireguard controller", func() {
 					return ""
 				}
 				data := string(secret.Data[wgName+"-peer1"])
-				for _, line := range strings.Split(data, "\n") {
+				for line := range strings.SplitSeq(data, "\n") {
 					if strings.Contains(line, "Endpoint") {
 						return line
 					}
@@ -812,7 +812,7 @@ var _ = Describe("wireguard controller", func() {
 				secret := &corev1.Secret{}
 				_ = k8sClient.Get(context.Background(), types.NamespacedName{Name: wgName + "-peer-configs", Namespace: wgNamespace}, secret)
 				data := string(secret.Data[wgName+"-peer1"])
-				for _, line := range strings.Split(data, "\n") {
+				for line := range strings.SplitSeq(data, "\n") {
 					if strings.Contains(line, "DNS") {
 						return line
 					}
@@ -1107,7 +1107,7 @@ var _ = Describe("wireguard controller", func() {
 					Namespace: wgNamespace,
 				}, secret)
 				data := string(secret.Data[peerKey.Name])
-				for _, line := range strings.Split(data, "\n") {
+				for line := range strings.SplitSeq(data, "\n") {
 					if strings.HasPrefix(line, "Address = ") {
 						return line
 					}
@@ -1193,7 +1193,7 @@ var _ = Describe("wireguard controller", func() {
 					Namespace: wgNamespace,
 				}, secret)
 				data := string(secret.Data[peerKey.Name])
-				for _, line := range strings.Split(data, "\n") {
+				for line := range strings.SplitSeq(data, "\n") {
 					if strings.HasPrefix(line, "Address = ") {
 						return line
 					}
@@ -1282,6 +1282,108 @@ var _ = Describe("wireguard controller", func() {
 				}
 				return dep.Spec.Template.Spec.Tolerations
 			}, Timeout, Interval).Should(BeEmpty())
+		})
+
+		It("rejects a peer with a duplicate address on the same wireguardRef", func() {
+			wgServer := &v1alpha1.Wireguard{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      wgKey.Name,
+					Namespace: wgKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardSpec{
+					ServiceType: corev1.ServiceTypeClusterIP,
+					Address:     "test-address",
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), wgServer)).Should(Succeed())
+
+			serviceName := wgKey.Name + "-svc"
+			serviceKey := types.NamespacedName{
+				Namespace: wgKey.Namespace,
+				Name:      serviceName,
+			}
+			Eventually(func() error {
+				svc := &corev1.Service{}
+				return k8sClient.Get(context.Background(), serviceKey, svc)
+			}, Timeout, Interval).Should(Succeed())
+			Expect(reconcileServiceWithClusterIP(serviceKey, 51820)).Should(Succeed())
+
+			// Wait for server to be ready
+			Eventually(func() string {
+				wg := &v1alpha1.Wireguard{}
+				_ = k8sClient.Get(context.Background(), wgKey, wg)
+				return wg.Status.Status
+			}, Timeout, Interval).Should(Equal("ready"))
+
+			// Create first peer with an explicit address
+			peer1Key := types.NamespacedName{
+				Name:      wgName + "-peer-dup1",
+				Namespace: wgNamespace,
+			}
+			peer1 := &v1alpha1.WireguardPeer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      peer1Key.Name,
+					Namespace: peer1Key.Namespace,
+				},
+				Spec: v1alpha1.WireguardPeerSpec{
+					WireguardRef: wgName,
+					Address:      "10.8.0.22",
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), peer1)).Should(Succeed())
+
+			// Wait for first peer to become ready
+			Eventually(func() string {
+				p := &v1alpha1.WireguardPeer{}
+				_ = k8sClient.Get(context.Background(), peer1Key, p)
+				return p.Status.Status
+			}, Timeout, Interval).Should(Equal("ready"))
+
+			// Create second peer with the same address
+			peer2Key := types.NamespacedName{
+				Name:      wgName + "-peer-dup2",
+				Namespace: wgNamespace,
+			}
+			peer2 := &v1alpha1.WireguardPeer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      peer2Key.Name,
+					Namespace: peer2Key.Namespace,
+				},
+				Spec: v1alpha1.WireguardPeerSpec{
+					WireguardRef: wgName,
+					Address:      "10.8.0.22",
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), peer2)).Should(Succeed())
+
+			// Second peer should be rejected with an error status
+			Eventually(func() string {
+				p := &v1alpha1.WireguardPeer{}
+				_ = k8sClient.Get(context.Background(), peer2Key, p)
+				return p.Status.Status
+			}, Timeout, Interval).Should(Equal("error"))
+
+			// Error message should mention the duplicate address and the conflicting peer
+			Eventually(func() string {
+				p := &v1alpha1.WireguardPeer{}
+				_ = k8sClient.Get(context.Background(), peer2Key, p)
+				return p.Status.Message
+			}, Timeout, Interval).Should(SatisfyAll(
+				ContainSubstring("Duplicate address 10.8.0.22"),
+				ContainSubstring(peer1Key.Name),
+			))
+
+			// The duplicate peer should NOT appear in the peer-configs Secret
+			Eventually(func() bool {
+				secret := &corev1.Secret{}
+				err := k8sClient.Get(context.Background(), types.NamespacedName{Name: wgName + "-peer-configs", Namespace: wgNamespace}, secret)
+				if err != nil {
+					return false
+				}
+				_, hasPeer1 := secret.Data[peer1Key.Name]
+				_, hasPeer2 := secret.Data[peer2Key.Name]
+				return hasPeer1 && !hasPeer2
+			}, Timeout, Interval).Should(BeTrue())
 		})
 
 		for _, useWgUserspace := range []bool{true, false} {
