@@ -14,7 +14,20 @@ spec:
     singular: wireguard
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.status
+      name: Status
+      type: string
+    - jsonPath: .status.address
+      name: Address
+      type: string
+    - jsonPath: .status.tunnel
+      name: Tunnel
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Wireguard is the Schema for the wireguards API
@@ -261,6 +274,85 @@ spec:
                       type: string
                   type: object
                 type: array
+              tunnel:
+                description: |-
+                  Tunnel configures optional traffic obfuscation. When enabled, a sidecar
+                  container tunnels WireGuard UDP traffic over WebSocket/TLS.
+                properties:
+                  enabled:
+                    description: Enabled activates the tunnel sidecar.
+                    type: boolean
+                  image:
+                    description: 'Image is the container image for the tunnel sidecar.
+                      Default: "ghcr.io/erebe/wstunnel:latest".'
+                    type: string
+                  port:
+                    default: 443
+                    description: 'Port is the external port the tunnel listens on.
+                      Default: 443.'
+                    format: int32
+                    type: integer
+                  resources:
+                    description: Resources for the tunnel sidecar container.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This is an alpha field and requires enabling the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  type:
+                    default: wstunnel
+                    description: Type selects the tunneling implementation. Currently
+                      only "wstunnel" is supported.
+                    enum:
+                    - wstunnel
+                    type: string
+                type: object
               useWgUserspaceImplementation:
                 description: A boolean field that specifies whether to use the userspace
                   implementation of Wireguard instead of the kernel one.
@@ -371,6 +463,10 @@ spec:
               status:
                 description: A string field that represents the current status of
                   Wireguard. This could include values like ready, pending, or error.
+                type: string
+              tunnel:
+                description: The active tunnel type (e.g., "wstunnel") or empty when
+                  tunneling is disabled.
                 type: string
               uniqueIdentifier:
                 description: A stable identifier for the Wireguard instance (e.g.,

@@ -30,6 +30,8 @@ import (
 const (
 	// HTTPPort is the port for HTTP health checks.
 	HTTPPort = 8080
+	// DefaultWstunnelImage is the default container image for the wstunnel sidecar.
+	DefaultWstunnelImage = "ghcr.io/erebe/wstunnel:latest"
 )
 
 // DeploymentBuilder builds deployments for wireguard resources.
@@ -110,6 +112,14 @@ func (b *DeploymentBuilder) ForWireguard(wg *v1alpha1.Wireguard) (*appsv1.Deploy
 	// Add IP forwarding init container if requested
 	if wg.Spec.EnableIpForwardOnPodInit {
 		dep.Spec.Template.Spec.InitContainers = append(dep.Spec.Template.Spec.InitContainers, b.ipForwardInitContainer())
+	}
+
+	// Add wstunnel sidecar if tunnel is enabled
+	if wg.Spec.Tunnel.Enabled {
+		dep.Spec.Template.Spec.Containers = append(
+			dep.Spec.Template.Spec.Containers,
+			b.wstunnelContainer(wg, readOnlyRootFilesystem, allowPrivilegeEscalation),
+		)
 	}
 
 	// Add userspace implementation flag if requested
@@ -198,6 +208,46 @@ func (b *DeploymentBuilder) agentContainer(wg *v1alpha1.Wireguard, readOnlyRootF
 			},
 		},
 		Resources: wg.Spec.Agent.Resources,
+	}
+}
+
+// wstunnelContainer creates the wstunnel sidecar container for traffic obfuscation.
+func (b *DeploymentBuilder) wstunnelContainer(wg *v1alpha1.Wireguard, readOnlyRootFilesystem, allowPrivilegeEscalation bool) corev1.Container {
+	image := wg.Spec.Tunnel.Image
+	if image == "" {
+		image = DefaultWstunnelImage
+	}
+	tunnelPort := wg.Spec.Tunnel.Port
+	if tunnelPort == 0 {
+		tunnelPort = DefaultTunnelPort
+	}
+	return corev1.Container{
+		SecurityContext: &corev1.SecurityContext{
+			ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,
+			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+		},
+		Image: image,
+		Name:  "wstunnel",
+		Command: []string{
+			"/home/app/wstunnel", "server",
+			"--restrict-to", fmt.Sprintf("127.0.0.1:%d", WireguardPort),
+			fmt.Sprintf("wss://0.0.0.0:%d", tunnelPort),
+		},
+		Ports: []corev1.ContainerPort{
+			{
+				ContainerPort: tunnelPort,
+				Name:          "tunnel",
+				Protocol:      corev1.ProtocolTCP,
+			},
+		},
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				TCPSocket: &corev1.TCPSocketAction{
+					Port: intstr.FromInt(int(tunnelPort)),
+				},
+			},
+		},
+		Resources: wg.Spec.Tunnel.Resources,
 	}
 }
 

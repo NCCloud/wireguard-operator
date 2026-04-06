@@ -47,9 +47,11 @@ import (
 )
 
 const (
-	port        = 51820
-	httpPort    = 8080
-	metricsPort = 9586
+	port                 = 51820
+	httpPort             = 8080
+	metricsPort          = 9586
+	defaultTunnelPort    = 443
+	defaultWstunnelImage = "ghcr.io/erebe/wstunnel:latest"
 )
 
 // Standard condition types for Wireguard
@@ -324,14 +326,31 @@ DNS = %s`, strings.TrimSpace(string(v)), addressLine, dnsConfiguration)
 				if serverMtu != "" {
 					pureCfg = pureCfg + "\nMTU = " + serverMtu
 				}
-				pureCfg = pureCfg + fmt.Sprintf(`
+				if wireguard.Spec.Tunnel.Enabled {
+					tunnelPort := wireguard.Spec.Tunnel.Port
+					if tunnelPort == 0 {
+						tunnelPort = defaultTunnelPort
+					}
+					pureCfg = pureCfg + fmt.Sprintf(`
+PreUp = wstunnel client -L udp://127.0.0.1:%d:127.0.0.1:%d wss://%s:%d &
+PostDown = killall wstunnel || true
+
+[Peer]
+PublicKey = %s
+AllowedIPs = %s
+Endpoint = 127.0.0.1:%d
+`, port, port, serverAddress, tunnelPort, serverPublicKey, allowIps, port)
+					newPeerCfgData[peer.Name] = []byte(pureCfg)
+				} else {
+					pureCfg = pureCfg + fmt.Sprintf(`
 
 [Peer]
 PublicKey = %s
 AllowedIPs = %s
 Endpoint = %s:%s
 `, serverPublicKey, allowIps, serverAddress, wireguard.Status.Port)
-				newPeerCfgData[peer.Name] = []byte(pureCfg)
+					newPeerCfgData[peer.Name] = []byte(pureCfg)
+				}
 			}
 		}
 		if peer.Status.Status != v1alpha1.Ready {
@@ -533,11 +552,34 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Error(err, "Failed to get service")
 		return ctrl.Result{}, err
 	}
+
+	// Update service ports if tunnel configuration changed.
+	if len(svcFound.Spec.Ports) > 0 {
+		desiredSvc := r.serviceForWireguard(wireguard, serviceType)
+		if svcFound.Spec.Ports[0].Port != desiredSvc.Spec.Ports[0].Port {
+			log.Info("Updating service ports for tunnel configuration change")
+			svcFound.Spec.Ports = desiredSvc.Spec.Ports
+			if err := r.Update(ctx, svcFound); err != nil {
+				log.Error(err, "Failed to update service ports")
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
 	address := wireguard.Spec.ExternalAddress
 	if address == "" {
 		address = wireguard.Spec.Address
 	}
+
+	// Compute the effective external port (tunnel port when enabled, WG port otherwise)
 	var port = fmt.Sprintf("%d", port)
+	if wireguard.Spec.Tunnel.Enabled {
+		tp := wireguard.Spec.Tunnel.Port
+		if tp == 0 {
+			tp = defaultTunnelPort
+		}
+		port = fmt.Sprintf("%d", tp)
+	}
 
 	if serviceType == corev1.ServiceTypeLoadBalancer {
 		ingressList := svcFound.Status.LoadBalancer.Ingress
@@ -782,6 +824,23 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// Ensure wstunnel sidecar presence matches spec
+	hasWstunnel := false
+	for _, c := range deploymentFound.Spec.Template.Spec.Containers {
+		if c.Name == "wstunnel" {
+			hasWstunnel = true
+			break
+		}
+	}
+	if hasWstunnel != wireguard.Spec.Tunnel.Enabled {
+		log.Info("Updating deployment tunnel sidecar", "desired", wireguard.Spec.Tunnel.Enabled, "existing", hasWstunnel)
+		dep := r.deploymentForWireguard(wireguard)
+		if err := r.Update(ctx, dep); err != nil {
+			log.Error(err, "unable to update deployment tunnel sidecar", "dep.Namespace", dep.Namespace, "dep.Name", dep.Name)
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Ensure scheduling settings remain in sync with spec updates.
 	if !reflect.DeepEqual(deploymentFound.Spec.Template.Spec.NodeSelector, wireguard.Spec.NodeSelector) ||
 		!reflect.DeepEqual(deploymentFound.Spec.Template.Spec.Tolerations, wireguard.Spec.Tolerations) {
@@ -846,8 +905,20 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		resourcesStatus = append(resourcesStatus, v1alpha1.Resource{Name: deploymentFound.Name, Type: "Deployment", Status: depStatus, Image: depImage})
 
+		// Compute tunnel status
+		tunnelStatus := "disabled"
+		if wireguard.Spec.Tunnel.Enabled {
+			tunnelStatus = wireguard.Spec.Tunnel.Type
+			if tunnelStatus == "" {
+				tunnelStatus = "wstunnel"
+			}
+		}
+
 		// Update status if changed
 		needUpdate := false
+		if wireguard.Status.Tunnel != tunnelStatus {
+			needUpdate = true
+		}
 		if wireguard.Status.UniqueIdentifier != uniqueIdentifier {
 			needUpdate = true
 		}
@@ -864,6 +935,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if needUpdate {
 			latest := &v1alpha1.Wireguard{}
 			if err := r.Get(ctx, req.NamespacedName, latest); err == nil {
+				latest.Status.Tunnel = tunnelStatus
 				latest.Status.UniqueIdentifier = uniqueIdentifier
 				latest.Status.Resources = resourcesStatus
 				if err := r.Status().Update(ctx, latest); err != nil {
@@ -915,6 +987,26 @@ func (r *WireguardReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *WireguardReconciler) serviceForWireguard(m *v1alpha1.Wireguard, serviceType corev1.ServiceType) *corev1.Service {
 	labels := labelsForWireguard(m.Name)
 
+	svcPorts := []corev1.ServicePort{{
+		Protocol:   corev1.ProtocolUDP,
+		NodePort:   m.Spec.NodePort,
+		Port:       port,
+		TargetPort: intstr.FromInt(port),
+	}}
+
+	if m.Spec.Tunnel.Enabled {
+		tunnelPort := m.Spec.Tunnel.Port
+		if tunnelPort == 0 {
+			tunnelPort = defaultTunnelPort
+		}
+		svcPorts = []corev1.ServicePort{{
+			Protocol:   corev1.ProtocolTCP,
+			NodePort:   m.Spec.NodePort,
+			Port:       tunnelPort,
+			TargetPort: intstr.FromInt(int(tunnelPort)),
+		}}
+	}
+
 	dep := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        m.Name + "-svc",
@@ -924,13 +1016,8 @@ func (r *WireguardReconciler) serviceForWireguard(m *v1alpha1.Wireguard, service
 		},
 		Spec: corev1.ServiceSpec{
 			Selector: labels,
-			Ports: []corev1.ServicePort{{
-				Protocol:   corev1.ProtocolUDP,
-				NodePort:   m.Spec.NodePort,
-				Port:       port,
-				TargetPort: intstr.FromInt(port),
-			}},
-			Type: serviceType,
+			Ports:    svcPorts,
+			Type:     serviceType,
 		},
 	}
 
@@ -1095,6 +1182,46 @@ func (r *WireguardReconciler) deploymentForWireguard(m *v1alpha1.Wireguard) *app
 				},
 			},
 		},
+	}
+
+	if m.Spec.Tunnel.Enabled {
+		image := m.Spec.Tunnel.Image
+		if image == "" {
+			image = defaultWstunnelImage
+		}
+		tunnelPort := m.Spec.Tunnel.Port
+		if tunnelPort == 0 {
+			tunnelPort = defaultTunnelPort
+		}
+		dep.Spec.Template.Spec.Containers = append(dep.Spec.Template.Spec.Containers,
+			corev1.Container{
+				SecurityContext: &corev1.SecurityContext{
+					ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,
+					AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+				},
+				Image: image,
+				Name:  "wstunnel",
+				Command: []string{
+					"/home/app/wstunnel", "server",
+					"--restrict-to", fmt.Sprintf("127.0.0.1:%d", port),
+					fmt.Sprintf("wss://0.0.0.0:%d", tunnelPort),
+				},
+				Ports: []corev1.ContainerPort{
+					{
+						ContainerPort: tunnelPort,
+						Name:          "tunnel",
+						Protocol:      corev1.ProtocolTCP,
+					},
+				},
+				ReadinessProbe: &corev1.Probe{
+					ProbeHandler: corev1.ProbeHandler{
+						TCPSocket: &corev1.TCPSocketAction{
+							Port: intstr.FromInt(int(tunnelPort)),
+						},
+					},
+				},
+				Resources: m.Spec.Tunnel.Resources,
+			})
 	}
 
 	if m.Spec.EnableIpForwardOnPodInit {

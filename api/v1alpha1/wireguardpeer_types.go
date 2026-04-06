@@ -121,6 +121,8 @@ type Speed struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.status`
+//+kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // WireguardPeer is the Schema for the wireguardpeers API
 type WireguardPeer struct {
