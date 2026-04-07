@@ -1552,6 +1552,7 @@ var _ = Describe("wireguard controller", func() {
 				}
 				return nil
 			}, Timeout, Interval).Should(Equal([]string{
+				"/usr/bin/dumb-init", "--",
 				"/home/app/wstunnel", "server",
 				"--restrict-to", "127.0.0.1:51820",
 				fmt.Sprintf("wss://0.0.0.0:%d", tunnelPort),

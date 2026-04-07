@@ -1202,6 +1202,7 @@ func (r *WireguardReconciler) deploymentForWireguard(m *v1alpha1.Wireguard) *app
 				Image: image,
 				Name:  "wstunnel",
 				Command: []string{
+					"/usr/bin/dumb-init", "--",
 					"/home/app/wstunnel", "server",
 					"--restrict-to", fmt.Sprintf("127.0.0.1:%d", port),
 					fmt.Sprintf("wss://0.0.0.0:%d", tunnelPort),
