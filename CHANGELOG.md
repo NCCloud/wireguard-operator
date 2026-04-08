@@ -1,3 +1,16 @@
+# [2.11.0](https://github.com/jodevsa/wireguard-operator/compare/v2.10.0...v2.11.0) (2026-04-08)
+
+This release adds traffic obfuscation support via [wstunnel](https://github.com/erebe/wstunnel), tunneling WireGuard UDP traffic over WebSocket/HTTPS so it appears as regular HTTPS to network observers.
+
+### Features
+* add support for `spec.tunnel` in the Wireguard API to enable traffic obfuscation via wstunnel sidecar. Supports running both direct WireGuard UDP and tunnel TCP ports simultaneously via `spec.tunnel.dualMode` 
+* add more descriptive status output for Wireguard and WireguarPeer API
+* detect duplicate peer addresses across peers in the same Wireguard instance
+
+### Changes
+* agent now handles SIGTERM gracefully for faster pod termination
+* service ports are now named (`wireguard`, `tunnel`) for multi-port compatibility
+
 # [2.10.0](https://github.com/jodevsa/wireguard-operator/compare/v2.9.0...v2.10.0) (2026-02-25)
 
 ### Features
