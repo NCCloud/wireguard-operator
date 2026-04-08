@@ -63,7 +63,7 @@ func (c *wireguardCollector) Collect(ch chan<- prometheus.Metric) {
 	if err != nil {
 		return
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	dev, err := client.Device(c.iface)
 	if err != nil || dev == nil {

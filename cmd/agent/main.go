@@ -152,7 +152,7 @@ func main() {
 	go func() {
 		<-ctx.Done()
 		log.Info("Shutting down agent")
-		srv.Shutdown(context.Background())
+		_ = srv.Shutdown(context.Background())
 	}()
 
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {

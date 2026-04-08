@@ -69,7 +69,7 @@ func OnStateChange(path string, logger logr.Logger, onFileChange func(State)) (f
 	}
 
 	close := func() {
-		watcher.Close()
+		_ = watcher.Close()
 	}
 
 	state, hash, err := GetDesiredState(path)
