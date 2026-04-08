@@ -279,6 +279,12 @@ spec:
                   Tunnel configures optional traffic obfuscation. When enabled, a sidecar
                   container tunnels WireGuard UDP traffic over WebSocket/TLS.
                 properties:
+                  dualMode:
+                    description: |-
+                      DualMode exposes both the direct WireGuard UDP port and the tunnel port on the service,
+                      and generates both a direct and a tunnel peer config. When false (default), only the
+                      tunnel port is exposed.
+                    type: boolean
                   enabled:
                     description: Enabled activates the tunnel sidecar.
                     type: boolean

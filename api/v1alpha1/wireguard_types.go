@@ -87,6 +87,10 @@ type TunnelSpec struct {
 	Port int32 `json:"port,omitempty"`
 	// Image is the container image for the tunnel sidecar. Default: "ghcr.io/erebe/wstunnel:latest".
 	Image string `json:"image,omitempty"`
+	// DualMode exposes both the direct WireGuard UDP port and the tunnel port on the service,
+	// and generates both a direct and a tunnel peer config. When false (default), only the
+	// tunnel port is exposed.
+	DualMode bool `json:"dualMode,omitempty"`
 	// Resources for the tunnel sidecar container.
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }

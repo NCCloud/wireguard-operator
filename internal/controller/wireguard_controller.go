@@ -331,7 +331,9 @@ DNS = %s`, strings.TrimSpace(string(v)), addressLine, dnsConfiguration)
 					if tunnelPort == 0 {
 						tunnelPort = defaultTunnelPort
 					}
-					pureCfg = pureCfg + fmt.Sprintf(`
+
+					// Tunnel config with PreUp/PostDown hooks
+					tunnelCfg := pureCfg + fmt.Sprintf(`
 PreUp = wstunnel client -L udp://127.0.0.1:%d:127.0.0.1:%d wss://%s:%d &
 PostDown = killall wstunnel || true
 
@@ -340,7 +342,24 @@ PublicKey = %s
 AllowedIPs = %s
 Endpoint = 127.0.0.1:%d
 `, port, port, serverAddress, tunnelPort, serverPublicKey, allowIps, port)
-					newPeerCfgData[peer.Name] = []byte(pureCfg)
+
+					if wireguard.Spec.Tunnel.DualMode {
+						// In dual mode, store both configs:
+						// <peer> = direct config (connects via WireGuard UDP)
+						// <peer>.tunnel = tunnel config (connects via wstunnel)
+						directCfg := pureCfg + fmt.Sprintf(`
+
+[Peer]
+PublicKey = %s
+AllowedIPs = %s
+Endpoint = %s:%s
+`, serverPublicKey, allowIps, serverAddress, wireguard.Status.Port)
+						newPeerCfgData[peer.Name] = []byte(directCfg)
+						newPeerCfgData[peer.Name+".tunnel"] = []byte(tunnelCfg)
+					} else {
+						// Tunnel-only: the main config uses the tunnel
+						newPeerCfgData[peer.Name] = []byte(tunnelCfg)
+					}
 				} else {
 					pureCfg = pureCfg + fmt.Sprintf(`
 
@@ -554,9 +573,16 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Update service ports if tunnel configuration changed.
-	if len(svcFound.Spec.Ports) > 0 {
+	// Compare port count and port numbers to detect tunnel/dualMode toggling.
+	{
 		desiredSvc := r.serviceForWireguard(wireguard, serviceType)
-		if svcFound.Spec.Ports[0].Port != desiredSvc.Spec.Ports[0].Port {
+		needsUpdate := len(svcFound.Spec.Ports) != len(desiredSvc.Spec.Ports)
+		if !needsUpdate && len(svcFound.Spec.Ports) > 0 {
+			if svcFound.Spec.Ports[0].Port != desiredSvc.Spec.Ports[0].Port {
+				needsUpdate = true
+			}
+		}
+		if needsUpdate {
 			log.Info("Updating service ports for tunnel configuration change")
 			svcFound.Spec.Ports = desiredSvc.Spec.Ports
 			if err := r.Update(ctx, svcFound); err != nil {
@@ -988,6 +1014,7 @@ func (r *WireguardReconciler) serviceForWireguard(m *v1alpha1.Wireguard, service
 	labels := labelsForWireguard(m.Name)
 
 	svcPorts := []corev1.ServicePort{{
+		Name:       "wireguard",
 		Protocol:   corev1.ProtocolUDP,
 		NodePort:   m.Spec.NodePort,
 		Port:       port,
@@ -999,12 +1026,17 @@ func (r *WireguardReconciler) serviceForWireguard(m *v1alpha1.Wireguard, service
 		if tunnelPort == 0 {
 			tunnelPort = defaultTunnelPort
 		}
-		svcPorts = []corev1.ServicePort{{
+		tunnelSvcPort := corev1.ServicePort{
+			Name:       "tunnel",
 			Protocol:   corev1.ProtocolTCP,
-			NodePort:   m.Spec.NodePort,
 			Port:       tunnelPort,
 			TargetPort: intstr.FromInt(int(tunnelPort)),
-		}}
+		}
+		if m.Spec.Tunnel.DualMode {
+			svcPorts = append(svcPorts, tunnelSvcPort)
+		} else {
+			svcPorts = []corev1.ServicePort{tunnelSvcPort}
+		}
 	}
 
 	dep := &corev1.Service{

@@ -48,6 +48,7 @@ func (b *ServiceBuilder) ForWireguard(wg *v1alpha1.Wireguard, serviceType corev1
 	labels := LabelsForWireguard(wg.Name)
 
 	svcPorts := []corev1.ServicePort{{
+		Name:       "wireguard",
 		Protocol:   corev1.ProtocolUDP,
 		NodePort:   wg.Spec.NodePort,
 		Port:       WireguardPort,
@@ -59,12 +60,17 @@ func (b *ServiceBuilder) ForWireguard(wg *v1alpha1.Wireguard, serviceType corev1
 		if tunnelPort == 0 {
 			tunnelPort = DefaultTunnelPort
 		}
-		svcPorts = []corev1.ServicePort{{
+		tunnelSvcPort := corev1.ServicePort{
+			Name:       "tunnel",
 			Protocol:   corev1.ProtocolTCP,
-			NodePort:   wg.Spec.NodePort,
 			Port:       tunnelPort,
 			TargetPort: intstr.FromInt(int(tunnelPort)),
-		}}
+		}
+		if wg.Spec.Tunnel.DualMode {
+			svcPorts = append(svcPorts, tunnelSvcPort)
+		} else {
+			svcPorts = []corev1.ServicePort{tunnelSvcPort}
+		}
 	}
 
 	svc := &corev1.Service{
