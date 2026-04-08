@@ -90,7 +90,7 @@ func (r *WireguardReconciler) ConfigmapForWireguard(m *v1alpha1.Wireguard, hostn
 		},
 	}
 
-	ctrl.SetControllerReference(m, dep, r.Scheme)
+	_ = ctrl.SetControllerReference(m, dep, r.Scheme)
 	return dep
 }
 
@@ -111,7 +111,7 @@ func (r *WireguardReconciler) getWireguardPeers(ctx context.Context, req ctrl.Re
 	return relatedPeers, nil
 }
 
-func (r *WireguardReconciler) getNodeIps(ctx context.Context, req ctrl.Request) ([]string, error) {
+func (r *WireguardReconciler) getNodeIps(ctx context.Context) ([]string, error) {
 	nodes := &corev1.NodeList{}
 	if err := r.List(ctx, nodes); err != nil {
 		return nil, err
@@ -140,7 +140,7 @@ func (r *WireguardReconciler) getNodeIps(ctx context.Context, req ctrl.Request) 
 	return ips, nil
 }
 
-func (r *WireguardReconciler) updateStatus(ctx context.Context, req ctrl.Request, wireguard *v1alpha1.Wireguard, cond metav1.Condition) error {
+func (r *WireguardReconciler) updateStatus(ctx context.Context, req ctrl.Request, cond metav1.Condition) error {
 	latest := &v1alpha1.Wireguard{}
 	if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
 		if errors.IsNotFound(err) {
@@ -437,7 +437,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	log.Info("loaded the following wireguard image:" + r.AgentImage)
 
 	wireguard := &v1alpha1.Wireguard{}
-	log.Info(req.NamespacedName.Name)
+	log.Info(req.Name)
 	err := r.Get(ctx, req.NamespacedName, wireguard)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -455,7 +455,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	log.Info("processing " + wireguard.Name)
 
 	if wireguard.Status.Status == "" {
-		err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "FetchingStatus", Message: "Fetching Wireguard status"})
+		err = r.updateStatus(ctx, req, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "FetchingStatus", Message: "Fetching Wireguard status"})
 
 		if err != nil {
 			return ctrl.Result{}, err
@@ -501,7 +501,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		// svc created successfully - return and requeue
 
-		err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "MetricsServicePending", Message: "Waiting for metrics service to be created"})
+		err = r.updateStatus(ctx, req, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "MetricsServicePending", Message: "Waiting for metrics service to be created"})
 
 		if err != nil {
 			return ctrl.Result{}, err
@@ -559,7 +559,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		// svc created successfully - return and requeue
 
-		err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "ServicePending", Message: "Waiting for service to be created"})
+		err = r.updateStatus(ctx, req, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "ServicePending", Message: "Waiting for service to be created"})
 
 		if err != nil {
 			log.Error(err, "Failed to update wireguard status", "service.Namespace", svc.Namespace, "service.Name", svc.Name)
@@ -611,7 +611,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		ingressList := svcFound.Status.LoadBalancer.Ingress
 		log.Info("Found ingress", "ingress", ingressList)
 		if len(ingressList) == 0 {
-			err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "ServiceNotReady", Message: "Waiting for service to be ready"})
+			err = r.updateStatus(ctx, req, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "ServiceNotReady", Message: "Waiting for service to be ready"})
 			if err != nil {
 				return ctrl.Result{}, err
 			}
@@ -629,7 +629,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	if serviceType == corev1.ServiceTypeNodePort {
 		if len(svcFound.Spec.Ports) == 0 {
-			err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "NodePortPending", Message: "Waiting for service with type NodePort to be ready"})
+			err = r.updateStatus(ctx, req, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "NodePortPending", Message: "Waiting for service with type NodePort to be ready"})
 			if err != nil {
 				return ctrl.Result{}, err
 			}
@@ -639,14 +639,14 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		port = strconv.Itoa(int(svcFound.Spec.Ports[0].NodePort))
 
-		ips, err := r.getNodeIps(ctx, req)
+		ips, err := r.getNodeIps(ctx)
 
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 		if address == "" {
 			if len(ips) == 0 {
-				err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "AwaitingNodeIPs", Message: "Unable to determine WG address through nodes addresses. Please set Wireguard.Spec.ExternalAddress or Wireguard.Spec.Address if necessary."})
+				err = r.updateStatus(ctx, req, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "AwaitingNodeIPs", Message: "Unable to determine WG address through nodes addresses. Please set Wireguard.Spec.ExternalAddress or Wireguard.Spec.Address if necessary."})
 				if err != nil {
 					return ctrl.Result{}, err
 				}
@@ -659,7 +659,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	if serviceType == corev1.ServiceTypeClusterIP {
 		if len(svcFound.Spec.Ports) == 0 {
-			err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "ClusterIPPending", Message: "Waiting for service with type ClusterIP to be ready"})
+			err = r.updateStatus(ctx, req, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "ClusterIPPending", Message: "Waiting for service with type ClusterIP to be ready"})
 			if err != nil {
 				return ctrl.Result{}, err
 			}
@@ -794,7 +794,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 
-		err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "ConfigMapPending", Message: "Waiting for configmap to be created"})
+		err = r.updateStatus(ctx, req, metav1.Condition{Type: ConditionProgressing, Status: metav1.ConditionTrue, Reason: "ConfigMapPending", Message: "Waiting for configmap to be created"})
 
 		return ctrl.Result{}, err
 	} else if err != nil {
@@ -884,15 +884,16 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		// Service status
 		svcStatus := "Pending"
-		if serviceType == corev1.ServiceTypeLoadBalancer {
+		switch serviceType {
+		case corev1.ServiceTypeLoadBalancer:
 			if len(svcFound.Status.LoadBalancer.Ingress) > 0 {
 				svcStatus = "Ready"
 			}
-		} else if serviceType == corev1.ServiceTypeNodePort {
+		case corev1.ServiceTypeNodePort:
 			if len(svcFound.Spec.Ports) > 0 && svcFound.Spec.Ports[0].NodePort != 0 {
 				svcStatus = "Ready"
 			}
-		} else { // ClusterIP
+		default: // ClusterIP
 			if svcFound.Spec.ClusterIP != "" {
 				svcStatus = "Ready"
 			}
@@ -982,7 +983,7 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	log.Info("Updated related peers", "wireguard.Namespace", wireguard.Namespace, "wireguard.Name", wireguard.Name)
 
-	err = r.updateStatus(ctx, req, wireguard, metav1.Condition{Type: ConditionReady, Status: metav1.ConditionTrue, Reason: "Active", Message: "VPN is active!"})
+	err = r.updateStatus(ctx, req, metav1.Condition{Type: ConditionReady, Status: metav1.ConditionTrue, Reason: "Active", Message: "VPN is active!"})
 
 	if err != nil {
 		return ctrl.Result{}, err
@@ -1059,7 +1060,7 @@ func (r *WireguardReconciler) serviceForWireguard(m *v1alpha1.Wireguard, service
 		}
 	}
 
-	ctrl.SetControllerReference(m, dep, r.Scheme)
+	_ = ctrl.SetControllerReference(m, dep, r.Scheme)
 	return dep
 }
 
@@ -1084,7 +1085,7 @@ func (r *WireguardReconciler) serviceForWireguardMetrics(m *v1alpha1.Wireguard) 
 		},
 	}
 
-	ctrl.SetControllerReference(m, dep, r.Scheme)
+	_ = ctrl.SetControllerReference(m, dep, r.Scheme)
 	return dep
 }
 
@@ -1100,7 +1101,7 @@ func (r *WireguardReconciler) secretForWireguard(m *v1alpha1.Wireguard, state []
 		Data: map[string][]byte{"state.json": state, "privateKey": []byte(privateKey), "publicKey": []byte(publicKey)},
 	}
 
-	ctrl.SetControllerReference(m, dep, r.Scheme)
+	_ = ctrl.SetControllerReference(m, dep, r.Scheme)
 
 	return dep
 
@@ -1280,6 +1281,6 @@ func (r *WireguardReconciler) deploymentForWireguard(m *v1alpha1.Wireguard) *app
 		}
 	}
 
-	ctrl.SetControllerReference(m, dep, r.Scheme)
+	_ = ctrl.SetControllerReference(m, dep, r.Scheme)
 	return dep
 }

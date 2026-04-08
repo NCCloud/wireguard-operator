@@ -104,7 +104,7 @@ func createLinkUsingUserspaceImpl(iface string, wgUserspaceImplementationFallbac
 		}
 	} else {
 		mode := fi.Mode()
-		if !(mode&os.ModeDevice != 0 && mode&os.ModeCharDevice != 0) {
+		if mode&os.ModeDevice == 0 || mode&os.ModeCharDevice == 0 {
 			return fmt.Errorf("/dev/net/tun exists but is not a character device")
 		}
 	}

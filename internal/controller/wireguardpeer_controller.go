@@ -64,7 +64,7 @@ func (r *WireguardPeerReconciler) secretForPeer(m *v1alpha1.WireguardPeer, priva
 		Data: map[string][]byte{"privateKey": []byte(privateKey), "publicKey": []byte(publicKey)},
 	}
 	// Set Nodered instance as the owner and controller
-	ctrl.SetControllerReference(m, dep, r.Scheme)
+	_ = ctrl.SetControllerReference(m, dep, r.Scheme)
 
 	return dep
 
@@ -188,18 +188,19 @@ func (r *WireguardPeerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	wireguardSecret := &corev1.Secret{}
-	err = r.Get(ctx, types.NamespacedName{Name: newPeer.Spec.WireguardRef, Namespace: newPeer.Namespace}, wireguardSecret)
+	_ = r.Get(ctx, types.NamespacedName{Name: newPeer.Spec.WireguardRef, Namespace: newPeer.Namespace}, wireguardSecret)
 
 	if len(newPeer.OwnerReferences) == 0 {
 		log.Info("Waiting for owner reference to be set " + wireguard.Name + " " + newPeer.Name)
-		ctrl.SetControllerReference(wireguard, newPeer, r.Scheme)
-
-		if err != nil {
-			log.Error(err, "Failed to update peer with controller reference")
+		if err := ctrl.SetControllerReference(wireguard, newPeer, r.Scheme); err != nil {
+			log.Error(err, "Failed to set controller reference")
 			return ctrl.Result{}, err
 		}
 
-		r.Update(ctx, newPeer)
+		if err := r.Update(ctx, newPeer); err != nil {
+			log.Error(err, "Failed to update peer with controller reference")
+			return ctrl.Result{}, err
+		}
 
 		return ctrl.Result{Requeue: true}, nil
 	}

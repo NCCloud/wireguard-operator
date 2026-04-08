@@ -1,0 +1,10 @@
+version: "2"
+
+linters:
+  enable:
+    - unparam
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - unparam
