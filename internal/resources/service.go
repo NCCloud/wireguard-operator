@@ -29,6 +29,8 @@ const (
 	WireguardPort = 51820
 	// MetricsPort is the port for exposing metrics.
 	MetricsPort = 9586
+	// DefaultTunnelPort is the default port for the wstunnel sidecar.
+	DefaultTunnelPort = 443
 )
 
 // ServiceBuilder builds services for wireguard resources.
@@ -45,6 +47,32 @@ func NewServiceBuilder(scheme *runtime.Scheme) *ServiceBuilder {
 func (b *ServiceBuilder) ForWireguard(wg *v1alpha1.Wireguard, serviceType corev1.ServiceType) (*corev1.Service, error) {
 	labels := LabelsForWireguard(wg.Name)
 
+	svcPorts := []corev1.ServicePort{{
+		Name:       "wireguard",
+		Protocol:   corev1.ProtocolUDP,
+		NodePort:   wg.Spec.NodePort,
+		Port:       WireguardPort,
+		TargetPort: intstr.FromInt(WireguardPort),
+	}}
+
+	if wg.Spec.Tunnel.Enabled {
+		tunnelPort := wg.Spec.Tunnel.Port
+		if tunnelPort == 0 {
+			tunnelPort = DefaultTunnelPort
+		}
+		tunnelSvcPort := corev1.ServicePort{
+			Name:       "tunnel",
+			Protocol:   corev1.ProtocolTCP,
+			Port:       tunnelPort,
+			TargetPort: intstr.FromInt(int(tunnelPort)),
+		}
+		if wg.Spec.Tunnel.DualMode {
+			svcPorts = append(svcPorts, tunnelSvcPort)
+		} else {
+			svcPorts = []corev1.ServicePort{tunnelSvcPort}
+		}
+	}
+
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        wg.Name + "-svc",
@@ -54,13 +82,8 @@ func (b *ServiceBuilder) ForWireguard(wg *v1alpha1.Wireguard, serviceType corev1
 		},
 		Spec: corev1.ServiceSpec{
 			Selector: labels,
-			Ports: []corev1.ServicePort{{
-				Protocol:   corev1.ProtocolUDP,
-				NodePort:   wg.Spec.NodePort,
-				Port:       WireguardPort,
-				TargetPort: intstr.FromInt(WireguardPort),
-			}},
-			Type: serviceType,
+			Ports:    svcPorts,
+			Type:     serviceType,
 		},
 	}
 

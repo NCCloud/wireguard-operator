@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/go-logr/stdr"
 	"github.com/nccloud/wireguard-operator/internal/agent"
@@ -142,6 +145,17 @@ func main() {
 	// Register collector
 	agent.RegisterWireguardCollector(iface)
 
-	// Health endpoint server (blocking)
-	_ = http.ListenAndServe(":8080", nil)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+
+	srv := &http.Server{Addr: ":8080"}
+	go func() {
+		<-ctx.Done()
+		log.Info("Shutting down agent")
+		srv.Shutdown(context.Background())
+	}()
+
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Error(err, "Health server error")
+	}
 }

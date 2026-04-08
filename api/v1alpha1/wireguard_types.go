@@ -69,6 +69,30 @@ type WireguardSpec struct {
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 	Agent       WireguardPodSpec    `json:"agent,omitempty"`
 	Metric      WireguardPodSpec    `json:"metric,omitempty"`
+	// Tunnel configures optional traffic obfuscation. When enabled, a sidecar
+	// container tunnels WireGuard UDP traffic over WebSocket/TLS.
+	Tunnel TunnelSpec `json:"tunnel,omitempty"`
+}
+
+// TunnelSpec configures traffic obfuscation via a tunneling sidecar.
+type TunnelSpec struct {
+	// Enabled activates the tunnel sidecar.
+	Enabled bool `json:"enabled,omitempty"`
+	// Type selects the tunneling implementation. Currently only "wstunnel" is supported.
+	// +kubebuilder:validation:Enum=wstunnel
+	// +kubebuilder:default=wstunnel
+	Type string `json:"type,omitempty"`
+	// Port is the external port the tunnel listens on. Default: 443.
+	// +kubebuilder:default=443
+	Port int32 `json:"port,omitempty"`
+	// Image is the container image for the tunnel sidecar. Default: "ghcr.io/erebe/wstunnel:latest".
+	Image string `json:"image,omitempty"`
+	// DualMode exposes both the direct WireGuard UDP port and the tunnel port on the service,
+	// and generates both a direct and a tunnel peer config. When false (default), only the
+	// tunnel port is exposed.
+	DualMode bool `json:"dualMode,omitempty"`
+	// Resources for the tunnel sidecar container.
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // WireguardPodSpec defines spec for respective containers created for Wireguard
@@ -87,6 +111,8 @@ type WireguardStatus struct {
 	Status string `json:"status,omitempty"`
 	// A string field that provides additional information about the status of Wireguard. This could include error messages or other information that helps to diagnose issues with the wg instance.
 	Message string `json:"message,omitempty"`
+	// The active tunnel type (e.g., "wstunnel") or empty when tunneling is disabled.
+	Tunnel string `json:"tunnel,omitempty"`
 	// A stable identifier for the Wireguard instance (e.g., server public key).
 	UniqueIdentifier string `json:"uniqueIdentifier,omitempty"`
 	// Resource-level status information for associated Kubernetes resources.
@@ -114,6 +140,10 @@ type Resource struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.status`
+//+kubebuilder:printcolumn:name="Address",type=string,JSONPath=`.status.address`
+//+kubebuilder:printcolumn:name="Tunnel",type=string,JSONPath=`.status.tunnel`
+//+kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Wireguard is the Schema for the wireguards API
 type Wireguard struct {

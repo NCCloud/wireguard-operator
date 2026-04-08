@@ -56,16 +56,28 @@ const (
 )
 
 func waitForDeploymentTobeReady(name string, namespace string) {
-	Eventually(func() int {
+	// Wait for the rollout to complete: observed generation matches the spec
+	// generation AND ready replicas equals the desired replicas. This prevents
+	// false positives during rolling updates where the old pod is still ready
+	// while the new pod is crash-looping.
+	Eventually(func() bool {
 		deploymentKey := types.NamespacedName{
 			Namespace: namespace,
 			Name:      name,
 		}
 
 		deployment := &v12.Deployment{}
-		k8sClient.Get(context.Background(), deploymentKey, deployment)
-		return int(deployment.Status.ReadyReplicas)
-	}, Timeout, Interval).Should(Equal(1))
+		if err := k8sClient.Get(context.Background(), deploymentKey, deployment); err != nil {
+			return false
+		}
+		desired := int32(1)
+		if deployment.Spec.Replicas != nil {
+			desired = *deployment.Spec.Replicas
+		}
+		return deployment.Status.ObservedGeneration >= deployment.Generation &&
+			deployment.Status.ReadyReplicas == desired &&
+			deployment.Status.UpdatedReplicas == desired
+	}, Timeout, Interval).Should(BeTrue())
 
 }
 
@@ -130,6 +142,41 @@ func KubectlApply(resource string, namespace string) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	if err := cmd.Run(); err != nil {
+		return strings.TrimSpace(stderr.String()), err
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// KubectlGet runs kubectl get with a jsonpath and returns the trimmed output.
+func KubectlGet(resource string, namespace string, jsonpath string) (string, error) {
+	cmd := exec.Command("kubectl", "get",
+		"--context", testKindContextName,
+		"-n", namespace,
+		resource,
+		"-o", "jsonpath="+jsonpath,
+	)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return strings.TrimSpace(stderr.String()), err
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// KubectlPatch patches a resource using a strategic merge patch.
+func KubectlPatch(resource string, namespace string, patchType string, patch string) (string, error) {
+	cmd := exec.Command("kubectl", "patch",
+		"--context", testKindContextName,
+		"-n", namespace,
+		resource,
+		"--type", patchType,
+		"-p", patch,
+	)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return strings.TrimSpace(stderr.String()), err
 	}
