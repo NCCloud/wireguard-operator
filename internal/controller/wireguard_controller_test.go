@@ -1688,4 +1688,123 @@ var _ = Describe("wireguard controller", func() {
 			))
 		})
 	})
+
+	Context("Race condition: WireguardPeer spec completeness", func() {
+		It("should fully initialize all peers (publicKey, privateKeyRef) even when multiple peers are created rapidly", func() {
+			// This test reproduces the race condition between WireguardPeerReconciler
+			// and WireguardReconciler. When a peer is created, the peer controller
+			// must set publicKey/privateKeyRef (via spec update), but the wireguard
+			// controller may also update the same peer's spec (to allocate an address).
+			// If both controllers race on the same ResourceVersion, the peer controller's
+			// key update can be lost, leaving the peer without publicKey/privateKeyRef.
+
+			RaceTimeout := time.Second * 30
+			expectedAddress := "69.0.0.100"
+			var expectedNodePort = "30100"
+
+			Expect(createNode(expectedAddress)).Should(Succeed())
+
+			wgServer := &v1alpha1.Wireguard{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      wgKey.Name,
+					Namespace: wgKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardSpec{
+					ServiceType: corev1.ServiceTypeNodePort,
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), wgServer)).Should(Succeed())
+
+			// Wait for the service to be created, then set it up so the WG becomes Ready.
+			serviceName := wgKey.Name + "-svc"
+			serviceKey := types.NamespacedName{Namespace: wgKey.Namespace, Name: serviceName}
+
+			Eventually(func() error {
+				svc := &corev1.Service{}
+				return k8sClient.Get(context.Background(), serviceKey, svc)
+			}, Timeout, Interval).Should(Succeed())
+
+			Expect(reconcileServiceWithTypeNodePort(serviceKey, expectedNodePort, 51820)).Should(Succeed())
+
+			// Wait for the Wireguard to become Ready — the peer controller won't
+			// proceed past key generation until the server is ready.
+			Eventually(func() string {
+				wg := &v1alpha1.Wireguard{}
+				_ = k8sClient.Get(context.Background(), wgKey, wg)
+				return wg.Status.Status
+			}, Timeout, Interval).Should(Equal(v1alpha1.Ready))
+
+			// Create multiple peers rapidly to increase the race window.
+			peerCount := 5
+			peerKeys := make([]types.NamespacedName, peerCount)
+			for i := 0; i < peerCount; i++ {
+				peerKeys[i] = types.NamespacedName{
+					Name:      fmt.Sprintf("race-peer-%d", i),
+					Namespace: wgNamespace,
+				}
+				peer := &v1alpha1.WireguardPeer{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      peerKeys[i].Name,
+						Namespace: peerKeys[i].Namespace,
+					},
+					Spec: v1alpha1.WireguardPeerSpec{
+						WireguardRef: wgName,
+					},
+				}
+				Expect(k8sClient.Create(context.Background(), peer)).Should(Succeed())
+			}
+
+			// Verify every peer eventually gets fully initialized:
+			// - publicKey must be non-empty
+			// - privateKeyRef.secretKeyRef.name must be non-empty
+			// - address must be allocated
+			// - status must become ready
+			//
+			// If the race condition is present, at least one peer will be stuck
+			// with an empty publicKey and privateKeyRef forever.
+			for i := 0; i < peerCount; i++ {
+				peerKey := peerKeys[i]
+
+				Eventually(func() string {
+					peer := &v1alpha1.WireguardPeer{}
+					err := k8sClient.Get(context.Background(), peerKey, peer)
+					if err != nil {
+						return ""
+					}
+					return peer.Spec.PublicKey
+				}, RaceTimeout, Interval).ShouldNot(BeEmpty(),
+					fmt.Sprintf("peer %s should have publicKey set", peerKey.Name))
+
+				Eventually(func() string {
+					peer := &v1alpha1.WireguardPeer{}
+					err := k8sClient.Get(context.Background(), peerKey, peer)
+					if err != nil {
+						return ""
+					}
+					return peer.Spec.PrivateKey.SecretKeyRef.Name
+				}, RaceTimeout, Interval).ShouldNot(BeEmpty(),
+					fmt.Sprintf("peer %s should have privateKeyRef set", peerKey.Name))
+
+				Eventually(func() string {
+					peer := &v1alpha1.WireguardPeer{}
+					err := k8sClient.Get(context.Background(), peerKey, peer)
+					if err != nil {
+						return ""
+					}
+					return peer.Spec.Address
+				}, RaceTimeout, Interval).ShouldNot(BeEmpty(),
+					fmt.Sprintf("peer %s should have address allocated", peerKey.Name))
+
+				Eventually(func() string {
+					peer := &v1alpha1.WireguardPeer{}
+					err := k8sClient.Get(context.Background(), peerKey, peer)
+					if err != nil {
+						return ""
+					}
+					return peer.Status.Status
+				}, RaceTimeout, Interval).Should(Equal(v1alpha1.Ready),
+					fmt.Sprintf("peer %s should reach ready status", peerKey.Name))
+			}
+		})
+	})
 })
