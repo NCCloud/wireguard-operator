@@ -121,21 +121,19 @@ func (r *WireguardPeerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if peer.Spec.PublicKey == "" {
 		secretName := peer.Name + "-peer"
 		existingSecret := &corev1.Secret{}
-		var privateKey, publicKey string
+		var publicKey string
 
 		err = r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: peer.Namespace}, existingSecret)
 		if err == nil {
 			// Secret already exists (previous attempt created it but the spec
 			// update was lost due to a conflict). Reuse the existing keys.
 			log.Info("Secret already exists, reusing existing keys", "secret.Name", secretName)
-			privateKey = string(existingSecret.Data["privateKey"])
 			publicKey = string(existingSecret.Data["publicKey"])
 		} else if errors.IsNotFound(err) {
 			// Secret does not exist yet — generate new keys and create it.
-			privateKey = key.String()
 			publicKey = key.PublicKey().String()
 
-			secret := r.secretForPeer(peer, privateKey, publicKey)
+			secret := r.secretForPeer(peer, key.String(), publicKey)
 			log.Info("Creating a new secret", "secret.Namespace", secret.Namespace, "secret.Name", secret.Name)
 			if err = r.Create(ctx, secret); err != nil {
 				log.Error(err, "Failed to create new secret", "secret.Namespace", secret.Namespace, "secret.Name", secret.Name)
