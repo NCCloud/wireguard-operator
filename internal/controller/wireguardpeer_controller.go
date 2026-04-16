@@ -119,25 +119,43 @@ func (r *WireguardPeerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	if peer.Spec.PublicKey == "" {
-		privateKey := key.String()
-		publicKey := key.PublicKey().String()
+		secretName := peer.Name + "-peer"
+		existingSecret := &corev1.Secret{}
+		var publicKey string
 
-		secret := r.secretForPeer(peer, privateKey, publicKey)
+		err = r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: peer.Namespace}, existingSecret)
+		if err == nil {
+			// Secret already exists (previous attempt created it but the spec
+			// update was lost due to a conflict). Reuse the existing keys.
+			log.Info("Secret already exists, reusing existing keys", "secret.Name", secretName)
+			publicKey = string(existingSecret.Data["publicKey"])
+		} else if errors.IsNotFound(err) {
+			// Secret does not exist yet — generate new keys and create it.
+			publicKey = key.PublicKey().String()
 
-		log.Info("Creating a new secret", "secret.Namespace", secret.Namespace, "secret.Name", secret.Name)
-		err = r.Create(ctx, secret)
-		if err != nil {
-			log.Error(err, "Failed to create new secret", "secret.Namespace", secret.Namespace, "secret.Name", secret.Name)
+			secret := r.secretForPeer(peer, key.String(), publicKey)
+			log.Info("Creating a new secret", "secret.Namespace", secret.Namespace, "secret.Name", secret.Name)
+			if err = r.Create(ctx, secret); err != nil {
+				log.Error(err, "Failed to create new secret", "secret.Namespace", secret.Namespace, "secret.Name", secret.Name)
+				return ctrl.Result{}, err
+			}
+		} else {
+			log.Error(err, "Failed to check for existing secret", "secret.Name", secretName)
 			return ctrl.Result{}, err
 		}
 
-		newPeer.Spec.PublicKey = publicKey
-		newPeer.Spec.PrivateKey = v1alpha1.PrivateKey{
-			SecretKeyRef: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: peer.Name + "-peer"}, Key: "privateKey"}}
-		err = r.Update(ctx, newPeer)
+		// Use a merge patch to set only the key fields. Unlike Update(),
+		// a patch doesn't send the full object and won't conflict with
+		// concurrent updates to other fields (e.g. address allocation by
+		// the Wireguard controller).
+		patchBase := client.MergeFrom(peer.DeepCopy())
+		peer.Spec.PublicKey = publicKey
+		peer.Spec.PrivateKey = v1alpha1.PrivateKey{
+			SecretKeyRef: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: "privateKey"}}
+		err = r.Patch(ctx, peer, patchBase)
 
 		if err != nil {
-			log.Error(err, "Failed to create new peer", "secret.Namespace", secret.Namespace, "secret.Name", secret.Name)
+			log.Error(err, "Failed to update peer with keys", "peer.Name", peer.Name)
 			return ctrl.Result{}, err
 		}
 
@@ -192,12 +210,13 @@ func (r *WireguardPeerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	if len(newPeer.OwnerReferences) == 0 {
 		log.Info("Waiting for owner reference to be set " + wireguard.Name + " " + newPeer.Name)
+		patchBase := client.MergeFrom(newPeer.DeepCopy())
 		if err := ctrl.SetControllerReference(wireguard, newPeer, r.Scheme); err != nil {
 			log.Error(err, "Failed to set controller reference")
 			return ctrl.Result{}, err
 		}
 
-		if err := r.Update(ctx, newPeer); err != nil {
+		if err := r.Patch(ctx, newPeer, patchBase); err != nil {
 			log.Error(err, "Failed to update peer with controller reference")
 			return ctrl.Result{}, err
 		}
