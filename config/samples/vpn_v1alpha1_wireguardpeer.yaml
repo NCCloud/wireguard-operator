@@ -3,4 +3,8 @@ kind: WireguardPeer
 metadata:
   name: wireguardpeer-sample
 spec:
-  # TODO(user): Add fields here
+  wireguardRef: "wireguard-sample"
+  # Networks that this peer is responsible for routing (e.g., the peer's local LAN)
+  # Other peers can reach these networks through the WireGuard server.
+  # routes:
+  #   - "10.10.30.0/24"
