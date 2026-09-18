@@ -174,13 +174,7 @@ func (c *wireguardCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	if len(socketsByPort) > 0 {
-		orphans := 0
-		for port := range socketsByPort {
-			// the device listen socket has no peer endpoint of its own
-			if !endpointPorts[port] && int(port) != dev.ListenPort {
-				orphans++
-			}
-		}
+		orphans := countOrphanSockets(socketsByPort, endpointPorts, dev.ListenPort)
 		ch <- prometheus.MustNewConstMetric(orphanSocketsDesc, prometheus.GaugeValue, float64(orphans))
 	}
 

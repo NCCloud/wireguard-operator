@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -11,6 +12,9 @@ const (
 	tcpStateCloseWait = "08"
 	tunnelPort        = 443
 )
+
+// procNetDirectory is the network namespace view of procfs, overridden in tests.
+var procNetDirectory = "/proc/self/net"
 
 type udpSocket struct {
 	localPort uint16
@@ -22,8 +26,8 @@ type udpSocket struct {
 // closeWaitSockets counts the TCP sockets stuck in CLOSE_WAIT on the tunnel port.
 func closeWaitSockets() (int, error) {
 	count := 0
-	for _, path := range []string{"/proc/self/net/tcp", "/proc/self/net/tcp6"} {
-		content, err := os.ReadFile(path)
+	for _, name := range []string{"tcp", "tcp6"} {
+		content, err := os.ReadFile(filepath.Join(procNetDirectory, name))
 		if err != nil {
 			return 0, err
 		}
@@ -50,7 +54,7 @@ func portOf(address string) uint16 {
 
 // udpRcvbufErrors reads the namespace wide UDP receive buffer drop counter.
 func udpRcvbufErrors() (float64, error) {
-	content, err := os.ReadFile("/proc/self/net/snmp")
+	content, err := os.ReadFile(filepath.Join(procNetDirectory, "snmp"))
 	if err != nil {
 		return 0, err
 	}
@@ -67,5 +71,17 @@ func udpRcvbufErrors() (float64, error) {
 			}
 		}
 	}
-	return 0, fmt.Errorf("RcvbufErrors not found in /proc/self/net/snmp")
+	return 0, fmt.Errorf("RcvbufErrors not found in %s/snmp", procNetDirectory)
+}
+
+// countOrphanSockets counts sockets that belong to neither a peer endpoint nor
+// the device listen port.
+func countOrphanSockets(sockets map[uint16]udpSocket, endpointPorts map[uint16]bool, listenPort int) int {
+	orphans := 0
+	for port := range sockets {
+		if !endpointPorts[port] && int(port) != listenPort {
+			orphans++
+		}
+	}
+	return orphans
 }
