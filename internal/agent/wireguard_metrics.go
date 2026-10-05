@@ -19,7 +19,13 @@ import (
 // - wireguard_sent_bytes_total (counter)
 // - wireguard_received_bytes_total (counter)
 // - wireguard_latest_handshake_seconds (gauge)
-// Labels: interface, public_key, allowed_ips
+// - wireguard_peer_socket_rx_queue_bytes (gauge)
+// - wireguard_peer_socket_rcvbuf_bytes (gauge)
+// - wireguard_peer_socket_drops_total (counter)
+// - wireguard_orphan_udp_sockets (gauge)
+// - wireguard_tunnel_close_wait_sockets (gauge)
+// - wireguard_netns_udp_rcvbuf_errors_total (counter)
+// Labels: interface, public_key, peer_name, allowed_ips
 type wireguardCollector struct {
 	iface string
 }
@@ -50,6 +56,41 @@ func getPeerName(publicKey string) string {
 	return name
 }
 
+var (
+	peerSocketLabels = []string{"interface", "public_key", "peer_name", "allowed_ips"}
+
+	peerSocketRxQueueDesc = prometheus.NewDesc(
+		"wireguard_peer_socket_rx_queue_bytes",
+		"Bytes queued on the peer socket receive queue",
+		peerSocketLabels, nil,
+	)
+	peerSocketRcvbufDesc = prometheus.NewDesc(
+		"wireguard_peer_socket_rcvbuf_bytes",
+		"Receive buffer limit of the peer socket",
+		peerSocketLabels, nil,
+	)
+	peerSocketDropsDesc = prometheus.NewDesc(
+		"wireguard_peer_socket_drops_total",
+		"Packets dropped on a full peer socket receive queue",
+		peerSocketLabels, nil,
+	)
+	orphanSocketsDesc = prometheus.NewDesc(
+		"wireguard_orphan_udp_sockets",
+		"UDP sockets with no live peer endpoint",
+		nil, nil,
+	)
+	closeWaitSocketsDesc = prometheus.NewDesc(
+		"wireguard_tunnel_close_wait_sockets",
+		"Tunnel TCP sockets stuck in CLOSE_WAIT",
+		nil, nil,
+	)
+	netnsRcvbufErrorsDesc = prometheus.NewDesc(
+		"wireguard_netns_udp_rcvbuf_errors_total",
+		"Namespace wide UDP receive buffer drops",
+		nil, nil,
+	)
+)
+
 func newWireguardCollector(iface string) *wireguardCollector {
 	return &wireguardCollector{iface: iface}
 }
@@ -70,8 +111,16 @@ func (c *wireguardCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
+	socketsByPort := map[uint16]udpSocket{}
+	if sockets, err := dumpUDPSockets(); err == nil {
+		for _, socket := range sockets {
+			socketsByPort[socket.localPort] = socket
+		}
+	}
+	endpointPorts := map[uint16]bool{}
+
 	for _, p := range dev.Peers {
-		labelNames := []string{"interface", "public_key", "peer_name", "allowed_ips"}
+		labelNames := peerSocketLabels
 		var cidrs []string
 		for _, ipnet := range p.AllowedIPs {
 			ones, _ := ipnet.Mask.Size()
@@ -109,6 +158,32 @@ func (c *wireguardCollector) Collect(ch chan<- prometheus.Metric) {
 			labelNames, nil,
 		)
 		ch <- prometheus.MustNewConstMetric(hsDesc, prometheus.GaugeValue, ts, labelValues...)
+
+		if p.Endpoint == nil {
+			continue
+		}
+		endpointPort := uint16(p.Endpoint.Port)
+		endpointPorts[endpointPort] = true
+		socket, ok := socketsByPort[endpointPort]
+		if !ok {
+			continue
+		}
+		ch <- prometheus.MustNewConstMetric(peerSocketRxQueueDesc, prometheus.GaugeValue, float64(socket.rxQueue), labelValues...)
+		ch <- prometheus.MustNewConstMetric(peerSocketRcvbufDesc, prometheus.GaugeValue, float64(socket.rcvbuf), labelValues...)
+		ch <- prometheus.MustNewConstMetric(peerSocketDropsDesc, prometheus.CounterValue, float64(socket.drops), labelValues...)
+	}
+
+	if len(socketsByPort) > 0 {
+		orphans := countOrphanSockets(socketsByPort, endpointPorts, dev.ListenPort)
+		ch <- prometheus.MustNewConstMetric(orphanSocketsDesc, prometheus.GaugeValue, float64(orphans))
+	}
+
+	if count, err := closeWaitSockets(); err == nil {
+		ch <- prometheus.MustNewConstMetric(closeWaitSocketsDesc, prometheus.GaugeValue, float64(count))
+	}
+
+	if errors, err := udpRcvbufErrors(); err == nil {
+		ch <- prometheus.MustNewConstMetric(netnsRcvbufErrorsDesc, prometheus.CounterValue, errors)
 	}
 }
 
