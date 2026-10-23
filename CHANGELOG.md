@@ -1,3 +1,14 @@
+# [2.12.0](https://github.com/NCCloud/wireguard-operator/compare/v2.11.0...v2.12.0) (2026-10-05)
+
+This release adds socket level metrics to the agent to help detect UDP buffer pressure and leaked wstunnel sockets, and fixes a race condition in peer reconciliation.
+
+### Features
+* add socket level metrics to the agent: `wireguard_peer_socket_rx_queue_bytes`, `wireguard_peer_socket_rcvbuf_bytes`, `wireguard_peer_socket_drops_total`, `wireguard_netns_udp_rcvbuf_errors_total`, `wireguard_orphan_udp_sockets` and `wireguard_tunnel_close_wait_sockets`
+* add a Grafana dashboard (`grafana-dashboard.json`) for WireGuard metrics
+
+### Bug Fixes
+* fix a race condition between `Wireguard` and `WireguardPeer` reconcilers that could leave peers stuck without keys. `WireguardPeer` updates now use patch instead of update
+
 # [2.11.0](https://github.com/jodevsa/wireguard-operator/compare/v2.10.0...v2.11.0) (2026-04-08)
 
 This release adds traffic obfuscation support via [wstunnel](https://github.com/erebe/wstunnel), tunneling WireGuard UDP traffic over WebSocket/HTTPS so it appears as regular HTTPS to network observers.
