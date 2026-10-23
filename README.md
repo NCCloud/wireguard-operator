@@ -83,7 +83,7 @@ Endpoint = 32.121.45.102:51820
 ## How to deploy
 ### Using provided manifest file
 ```
-kubectl apply -f https://github.com/nccloud/wireguard-operator/releases/download/v2.11.0/release.yaml
+kubectl apply -f https://github.com/nccloud/wireguard-operator/releases/download/v2.12.0/release.yaml
 ```
 
 ### Using Helm
@@ -100,7 +100,7 @@ helm install wireguard nccloud/wireguard-operator -n wireguard-system --set name
 ## How to remove
 ### Using provided manifest file
 ```
-kubectl delete -f https://github.com/nccloud/wireguard-operator/releases/download/v2.11.0/release.yaml
+kubectl delete -f https://github.com/nccloud/wireguard-operator/releases/download/v2.12.0/release.yaml
 ```
 ### Using Helm
 ```
