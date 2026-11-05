@@ -1,3 +1,9 @@
+# [2.12.1](https://github.com/NCCloud/wireguard-operator/compare/v2.12.0...v2.12.1) (2026-11-05)
+
+### Changes
+* build with Go 1.27.3
+* disable MPTCP on listeners (`godebug multipathtcp=0`) to stay off the attack surface of the Linux kernel MPTCP vulnerability [CVE-2026-98432](https://nvd.nist.gov/vuln/detail/CVE-2026-98432). Go enables MPTCP on listeners by default since 1.24; disabling it by default is being discussed in [golang/go#82717](https://github.com/golang/go/issues/82717)
+
 # [2.12.0](https://github.com/NCCloud/wireguard-operator/compare/v2.11.0...v2.12.0) (2026-10-05)
 
 This release adds socket level metrics to the agent to help detect UDP buffer pressure and leaked wstunnel sockets, and fixes a race condition in peer reconciliation.
