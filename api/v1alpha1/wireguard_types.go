@@ -60,7 +60,20 @@ type WireguardSpec struct {
 	// A map of key value strings for service annotations
 	ServiceAnnotations map[string]string `json:"serviceAnnotations,omitempty"`
 	// A boolean field that specifies whether IP forwarding should be enabled on the Wireguard VPN pod at startup. This can be useful to enable if the peers are having problems with sending traffic to the internet.
+	//
+	// Deprecated: set sysctls with `net.ipv4.ip_forward: "1"` instead. Still honored: when true,
+	// net.ipv4.ip_forward=1 is added to sysctls unless sysctls sets net.ipv4.ip_forward itself.
 	EnableIpForwardOnPodInit bool `json:"enableIpForwardOnPodInit,omitempty"`
+	// Sysctls is a map of network kernel parameters written into the Wireguard pod's network
+	// namespace by a privileged init container at pod start. Each key is written to
+	// /proc/sys/<key with dots replaced by slashes>, and values must be strings.
+	// Only net.* keys are accepted. They are resolved in the pod's network namespace, so a
+	// write never changes the node. Global net.* keys (for example net.core.rmem_max) do not
+	// exist there; setting one, or a value the kernel rejects, fails the init container and
+	// the pod does not start. Which net.* keys are per-namespace depends on the kernel version.
+	// Changing this field rolls the Wireguard Deployment.
+	// +kubebuilder:validation:XValidation:rule="self.all(k, k.matches('^net([.][a-z0-9_]+)+$'))",message="sysctl keys must be net.* and match ^net([.][a-z0-9_]+)+$"
+	Sysctls map[string]string `json:"sysctls,omitempty"`
 	// A boolean field that specifies whether to use the userspace implementation of Wireguard instead of the kernel one.
 	UseWgUserspaceImplementation bool `json:"useWgUserspaceImplementation,omitempty"`
 

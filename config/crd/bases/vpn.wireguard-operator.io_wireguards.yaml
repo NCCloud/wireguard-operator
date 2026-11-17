@@ -126,10 +126,11 @@ spec:
                   to be used by the peers.
                 type: string
               enableIpForwardOnPodInit:
-                description: A boolean field that specifies whether IP forwarding
-                  should be enabled on the Wireguard VPN pod at startup. This can
-                  be useful to enable if the peers are having problems with sending
-                  traffic to the internet.
+                description: |-
+                  A boolean field that specifies whether IP forwarding should be enabled on the Wireguard VPN pod at startup. This can be useful to enable if the peers are having problems with sending traffic to the internet.
+
+                  Deprecated: set sysctls with `net.ipv4.ip_forward: "1"` instead. Still honored: when true,
+                  net.ipv4.ip_forward=1 is added to sysctls unless sysctls sets net.ipv4.ip_forward itself.
                 type: boolean
               externalAddress:
                 description: |-
@@ -234,6 +235,22 @@ spec:
                   that should be used for the Wireguard VPN. This could be ClusterIP,
                   NodePort or LoadBalancer, depending on the needs of the deployment.
                 type: string
+              sysctls:
+                additionalProperties:
+                  type: string
+                description: |-
+                  Sysctls is a map of network kernel parameters written into the Wireguard pod's network
+                  namespace by a privileged init container at pod start. Each key is written to
+                  /proc/sys/<key with dots replaced by slashes>, and values must be strings.
+                  Only net.* keys are accepted. They are resolved in the pod's network namespace, so a
+                  write never changes the node. Global net.* keys (for example net.core.rmem_max) do not
+                  exist there; setting one, or a value the kernel rejects, fails the init container and
+                  the pod does not start. Which net.* keys are per-namespace depends on the kernel version.
+                  Changing this field rolls the Wireguard Deployment.
+                type: object
+                x-kubernetes-validations:
+                - message: sysctl keys must be net.* and match ^net([.][a-z0-9_]+)+$
+                  rule: self.all(k, k.matches('^net([.][a-z0-9_]+)+$'))
               tolerations:
                 description: A list of Kubernetes taint tolerations applied to the
                   Wireguard pod.

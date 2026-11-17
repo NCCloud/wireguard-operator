@@ -68,6 +68,7 @@ func (b *DeploymentBuilder) ForWireguard(wg *v1alpha1.Wireguard) (*appsv1.Deploy
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
+			Strategy: RollingUpdateStrategy(),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: ls,
 			},
@@ -109,9 +110,9 @@ func (b *DeploymentBuilder) ForWireguard(wg *v1alpha1.Wireguard) (*appsv1.Deploy
 		},
 	}
 
-	// Add IP forwarding init container if requested
-	if wg.Spec.EnableIpForwardOnPodInit {
-		dep.Spec.Template.Spec.InitContainers = append(dep.Spec.Template.Spec.InitContainers, b.ipForwardInitContainer())
+	// Add the sysctl init container if spec.sysctls (or the deprecated enableIpForwardOnPodInit) is set
+	if c, ok := SysctlInitContainer(wg, b.agentImage, b.agentImagePullPolicy); ok {
+		dep.Spec.Template.Spec.InitContainers = append(dep.Spec.Template.Spec.InitContainers, c)
 	}
 
 	// Add wstunnel sidecar if tunnel is enabled
@@ -249,20 +250,5 @@ func (b *DeploymentBuilder) wstunnelContainer(wg *v1alpha1.Wireguard, readOnlyRo
 			},
 		},
 		Resources: wg.Spec.Tunnel.Resources,
-	}
-}
-
-// ipForwardInitContainer creates an init container to enable IP forwarding.
-func (b *DeploymentBuilder) ipForwardInitContainer() corev1.Container {
-	privileged := true
-	return corev1.Container{
-		SecurityContext: &corev1.SecurityContext{
-			Privileged: &privileged,
-		},
-		Image:           b.agentImage,
-		ImagePullPolicy: b.agentImagePullPolicy,
-		Name:            "sysctl",
-		Command:         []string{"/bin/sh"},
-		Args:            []string{"-c", "echo 1 > /proc/sys/net/ipv4/ip_forward"},
 	}
 }

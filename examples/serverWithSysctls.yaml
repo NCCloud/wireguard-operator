@@ -3,4 +3,5 @@ kind: Wireguard
 metadata:
   name: vpn
 spec:
-  enableIpForwardOnPodInit: true
+  sysctls:
+    net.ipv4.ip_forward: "1"
