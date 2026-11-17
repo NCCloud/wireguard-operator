@@ -43,7 +43,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const (
@@ -59,6 +61,8 @@ const (
 	ConditionReady       = "Ready"
 	ConditionProgressing = "Progressing"
 	ConditionDegraded    = "Degraded"
+
+	reasonSysctlFailed = "SysctlFailed"
 )
 
 // WireguardReconciler reconciles a Wireguard object
@@ -158,10 +162,10 @@ func (r *WireguardReconciler) updateStatus(ctx context.Context, req ctrl.Request
 	meta.SetStatusCondition(&latest.Status.Conditions, cond)
 
 	// Backward-compatible summary fields derived from condition type
-	switch cond.Type {
-	case ConditionReady:
+	switch {
+	case cond.Type == ConditionReady && cond.Status == metav1.ConditionTrue:
 		latest.Status.Status = v1alpha1.Ready
-	case ConditionDegraded:
+	case cond.Type == ConditionDegraded && cond.Status == metav1.ConditionTrue:
 		latest.Status.Status = v1alpha1.Error
 	default:
 		latest.Status.Status = v1alpha1.Pending
@@ -878,6 +882,18 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// Ensure the sysctl init container matches spec (enableIpForwardOnPodInit and sysctls).
+	if invalid := resources.InvalidSysctlKeys(wireguard.Spec.Sysctls); len(invalid) > 0 {
+		log.Info("Ignoring invalid sysctl keys", "keys", invalid)
+	}
+	if desired := r.deploymentForWireguard(wireguard); resources.SysctlsDrifted(deploymentFound, desired) {
+		log.Info("Updating deployment sysctls")
+		if err := r.Update(ctx, desired); err != nil {
+			log.Error(err, "unable to update deployment sysctls", "dep.Namespace", desired.Namespace, "dep.Name", desired.Name)
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Update resource-level status and unique identifier if available
 	{
 		resourcesStatus := make([]v1alpha1.Resource, 0, 4)
@@ -983,6 +999,31 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	log.Info("Updated related peers", "wireguard.Namespace", wireguard.Namespace, "wireguard.Name", wireguard.Name)
 
+	// Report a failing sysctl init container instead of "active". With the RollingUpdate
+	// strategy the previous pod, if any, keeps serving while the new one fails.
+	sysctlFailure, err := r.sysctlFailure(ctx, wireguard)
+	if err != nil {
+		log.Error(err, "Failed to check sysctl init container status")
+		return ctrl.Result{}, err
+	}
+	if sysctlFailure != "" {
+		log.Info("sysctl init container failed", "message", sysctlFailure)
+		if deploymentFound.Status.AvailableReplicas == 0 {
+			if err := r.updateStatus(ctx, req, metav1.Condition{Type: ConditionReady, Status: metav1.ConditionFalse, Reason: reasonSysctlFailed, Message: sysctlFailure}); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		if err := r.updateStatus(ctx, req, metav1.Condition{Type: ConditionDegraded, Status: metav1.ConditionTrue, Reason: reasonSysctlFailed, Message: sysctlFailure}); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+	if cond := meta.FindStatusCondition(wireguard.Status.Conditions, ConditionDegraded); cond != nil && cond.Status == metav1.ConditionTrue && cond.Reason == reasonSysctlFailed {
+		if err := r.updateStatus(ctx, req, metav1.Condition{Type: ConditionDegraded, Status: metav1.ConditionFalse, Reason: "SysctlsApplied", Message: "sysctls applied"}); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	err = r.updateStatus(ctx, req, metav1.Condition{Type: ConditionReady, Status: metav1.ConditionTrue, Reason: "Active", Message: "VPN is active!"})
 
 	if err != nil {
@@ -990,6 +1031,35 @@ func (r *WireguardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// sysctlFailure returns a description of the first failing sysctl init container among the
+// Wireguard's pods, or "" if none is failing.
+func (r *WireguardReconciler) sysctlFailure(ctx context.Context, wg *v1alpha1.Wireguard) (string, error) {
+	pods := &corev1.PodList{}
+	if err := r.List(ctx, pods, client.InNamespace(wg.Namespace), client.MatchingLabels(labelsForWireguard(wg.Name))); err != nil {
+		return "", err
+	}
+	slices.SortFunc(pods.Items, func(a, b corev1.Pod) int { return strings.Compare(a.Name, b.Name) })
+	for i := range pods.Items {
+		if pods.Items[i].DeletionTimestamp != nil {
+			continue
+		}
+		if msg, failed := resources.SysctlFailure(&pods.Items[i]); failed {
+			return fmt.Sprintf("sysctl init container failed on pod %s: %s", pods.Items[i].Name, msg), nil
+		}
+	}
+	return "", nil
+}
+
+// wireguardForPod maps a Wireguard server pod to its Wireguard, so pod status changes
+// (such as a failing sysctl init container) trigger a reconcile.
+func wireguardForPod(_ context.Context, obj client.Object) []reconcile.Request {
+	labels := obj.GetLabels()
+	if labels["app"] != "wireguard" || labels["instance"] == "" {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: labels["instance"]}}}
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -1008,6 +1078,7 @@ func (r *WireguardReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ConfigMap{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Secret{}).
+		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(wireguardForPod)).
 		Complete(r)
 }
 
@@ -1123,6 +1194,7 @@ func (r *WireguardReconciler) deploymentForWireguard(m *v1alpha1.Wireguard) *app
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
+			Strategy: resources.RollingUpdateStrategy(),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: ls,
 			},
@@ -1258,19 +1330,8 @@ func (r *WireguardReconciler) deploymentForWireguard(m *v1alpha1.Wireguard) *app
 			})
 	}
 
-	if m.Spec.EnableIpForwardOnPodInit {
-		privileged := true
-		dep.Spec.Template.Spec.InitContainers = append(dep.Spec.Template.Spec.InitContainers,
-			corev1.Container{
-				SecurityContext: &corev1.SecurityContext{
-					Privileged: &privileged,
-				},
-				Image:           r.AgentImage,
-				ImagePullPolicy: r.AgentImagePullPolicy,
-				Name:            "sysctl",
-				Command:         []string{"/bin/sh"},
-				Args:            []string{"-c", "echo 1 > /proc/sys/net/ipv4/ip_forward"},
-			})
+	if c, ok := resources.SysctlInitContainer(m, r.AgentImage, r.AgentImagePullPolicy); ok {
+		dep.Spec.Template.Spec.InitContainers = append(dep.Spec.Template.Spec.InitContainers, c)
 	}
 
 	if m.Spec.UseWgUserspaceImplementation {

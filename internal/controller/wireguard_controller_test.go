@@ -1288,6 +1288,123 @@ var _ = Describe("wireguard controller", func() {
 			}, Timeout, Interval).Should(BeEmpty())
 		})
 
+		It("reconciles the sysctl init container when spec.sysctls changes", func() {
+			wgServer := &v1alpha1.Wireguard{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      wgKey.Name,
+					Namespace: wgKey.Namespace,
+				},
+				Spec: v1alpha1.WireguardSpec{
+					ServiceType: corev1.ServiceTypeClusterIP,
+					Address:     "test-address",
+				},
+			}
+			Expect(k8sClient.Create(context.Background(), wgServer)).Should(Succeed())
+
+			serviceKey := types.NamespacedName{Namespace: wgKey.Namespace, Name: wgKey.Name + "-svc"}
+			Eventually(func() error {
+				return k8sClient.Get(context.Background(), serviceKey, &corev1.Service{})
+			}, Timeout, Interval).Should(Succeed())
+			Expect(reconcileServiceWithClusterIP(serviceKey, 51820)).Should(Succeed())
+
+			depKey := types.NamespacedName{Namespace: wgKey.Namespace, Name: wgKey.Name + "-dep"}
+			sysctlArgs := func() []string {
+				dep := &appsv1.Deployment{}
+				if err := k8sClient.Get(context.Background(), depKey, dep); err != nil {
+					return []string{"<missing>"}
+				}
+				for _, c := range dep.Spec.Template.Spec.InitContainers {
+					if c.Name == "sysctl" {
+						return c.Args
+					}
+				}
+				return nil
+			}
+			Eventually(sysctlArgs, Timeout, Interval).Should(BeNil())
+
+			// Invalid and non-net keys are rejected by the CRD.
+			for _, key := range []string{"net/../../x", "kernel.core_pattern"} {
+				Eventually(func() error {
+					wg := &v1alpha1.Wireguard{}
+					if err := k8sClient.Get(context.Background(), wgKey, wg); err != nil {
+						return err
+					}
+					wg.Spec.Sysctls = map[string]string{key: "1"}
+					return k8sClient.Update(context.Background(), wg)
+				}, Timeout, Interval).Should(MatchError(ContainSubstring("sysctl keys must be net.*")))
+			}
+
+			updateSysctls := func(sysctls map[string]string) {
+				Eventually(func() error {
+					wg := &v1alpha1.Wireguard{}
+					if err := k8sClient.Get(context.Background(), wgKey, wg); err != nil {
+						return err
+					}
+					wg.Spec.Sysctls = sysctls
+					return k8sClient.Update(context.Background(), wg)
+				}, Timeout, Interval).Should(Succeed())
+			}
+
+			updateSysctls(map[string]string{
+				"net.ipv4.tcp_notsent_lowat":      "131072",
+				"net.ipv4.tcp_congestion_control": "bbr",
+			})
+			Eventually(sysctlArgs, Timeout, Interval).Should(Equal([]string{"-c",
+				"set -e\n" +
+					"printf '%s\\n' 'bbr' > /proc/sys/net/ipv4/tcp_congestion_control || { echo 'failed to set sysctl net.ipv4.tcp_congestion_control' >&2; exit 1; }\n" +
+					"printf '%s\\n' '131072' > /proc/sys/net/ipv4/tcp_notsent_lowat || { echo 'failed to set sysctl net.ipv4.tcp_notsent_lowat' >&2; exit 1; }\n",
+			}))
+
+			// A server pod whose sysctl init container fails is reported on the Wireguard status.
+			statusOf := func() []string {
+				wg := &v1alpha1.Wireguard{}
+				if err := k8sClient.Get(context.Background(), wgKey, wg); err != nil {
+					return nil
+				}
+				return []string{wg.Status.Status, wg.Status.Message}
+			}
+			Eventually(statusOf, Timeout, Interval).Should(Equal([]string{"ready", "VPN is active!"}))
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      wgKey.Name + "-dep-failing",
+					Namespace: wgKey.Namespace,
+					Labels:    map[string]string{"app": "wireguard", "instance": wgKey.Name},
+				},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "agent", Image: "agent"}}},
+			}
+			Expect(k8sClient.Create(context.Background(), pod)).Should(Succeed())
+			pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{
+				Name:  "sysctl",
+				State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}},
+				LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					ExitCode: 1,
+					Message:  "failed to set sysctl net.ipv4.tcp_congestion_control",
+				}},
+			}}
+			Expect(k8sClient.Status().Update(context.Background(), pod)).Should(Succeed())
+
+			Eventually(statusOf, Timeout, Interval).Should(Equal([]string{"error",
+				"sysctl init container failed on pod " + pod.Name + ": failed to set sysctl net.ipv4.tcp_congestion_control"}))
+
+			// Once the failing pod is gone, the Wireguard is ready again and Degraded is cleared.
+			Expect(k8sClient.Delete(context.Background(), pod, client.GracePeriodSeconds(0))).Should(Succeed())
+			Eventually(statusOf, Timeout, Interval).Should(Equal([]string{"ready", "VPN is active!"}))
+			Eventually(func() string {
+				wg := &v1alpha1.Wireguard{}
+				_ = k8sClient.Get(context.Background(), wgKey, wg)
+				for _, c := range wg.Status.Conditions {
+					if c.Type == ConditionDegraded {
+						return string(c.Status) + "/" + c.Reason
+					}
+				}
+				return ""
+			}, Timeout, Interval).Should(Equal("False/SysctlsApplied"))
+
+			updateSysctls(nil)
+			Eventually(sysctlArgs, Timeout, Interval).Should(BeNil())
+		})
+
 		It("rejects a peer with a duplicate address on the same wireguardRef", func() {
 			wgServer := &v1alpha1.Wireguard{
 				ObjectMeta: metav1.ObjectMeta{

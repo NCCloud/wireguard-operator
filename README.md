@@ -10,7 +10,7 @@ If you are facing any problems please open an [issue](https://github.com/nccloud
 ## Tested with
 - [x] IBM Cloud Kubernetes Service
 - [x] Gcore Labs KMP
-  * requires `spec.enableIpForwardOnPodInit: true`
+  * requires `spec.sysctls: {net.ipv4.ip_forward: "1"}` (formerly `spec.enableIpForwardOnPodInit: true`, now deprecated)
 - [x] Google Kubernetes Engine
   * requires `spec.mtu: "1380"`
   * Not compatible with "Container-Optimized OS with containerd" node images
